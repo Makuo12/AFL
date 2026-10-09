@@ -1251,18 +1251,18 @@ static void remove_shm(void) {
    count information here. This is called only sporadically, for some
    new paths. */
 
-static void minimize_bits(u8* dst, u8* src) {
+// static void minimize_bits(u8* dst, u8* src) {
 
-  u32 i = 0;
+//   u32 i = 0;
 
-  while (i < MAP_SIZE) {
+//   while (i < MAP_SIZE) {
 
-    if (*(src++)) dst[i >> 3] |= 1 << (i & 7);
-    i++;
+//     if (*(src++)) dst[i >> 3] |= 1 << (i & 7);
+//     i++;
 
-  }
+//   }
 
-}
+// }
 
 
 /* When we bump into a new path, we call this to see if the path appears
@@ -1310,7 +1310,7 @@ static void update_bitmap_score(struct queue_entry* q) {
 
        if (!q->trace_mini) {
          q->trace_mini = ck_alloc(MAP_SIZE >> 3);
-         minimize_bits(q->trace_mini, trace_bits);
+        //  minimize_bits(q->trace_mini, trace_bits);
        }
 
        score_changed = 1;
