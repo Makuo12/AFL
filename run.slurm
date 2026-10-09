@@ -55,7 +55,7 @@ if [[ "${1:-}" = "arc" ]]; then
 
 else
     wrap=$(pwd)
-    output="$wrap/project_output"
+    output="$wrap/output"
 
     ID="local_$(date +%s)_$$"
     FULL_ID="${PROGRAM:-project}_${ID}"
