@@ -36,7 +36,7 @@ int check = 0;
 /* ------------------------------------------------------------------ */
 
 Trace *addresses;
-u8 *trace_bits; /* SHM with instrumentation bitmap  */
+int *trace_bits; /* SHM with instrumentation bitmap  */
 
 u8 count[MAP_SIZE]; /* SHM with instrumentation bitmap  */
 
@@ -219,7 +219,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         if (check) {
             count[index_block] = new_value;
         } else {
-            trace_bits[index_block] = bucket_of(new_value);
+            // trace_bits[index_block] = bucket_of(new_value);
         }
         log_line("loop counter hit index %d, value %d\n", index_block, new_value);
     }
@@ -236,7 +236,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         }
         else
         {
-            trace_bits[index_block] = 1;
+            // trace_bits[index_block] = 1;
         }
         log_line("normal hit index %d, value %d\n", index_block, 1);
     }
@@ -410,5 +410,6 @@ int main(int argc, char **argv)
         }
         log_line("Number of edges covered: %d\n", my_count);
     }
+    trace_bits[0] = current_address;
     return result;
 }
