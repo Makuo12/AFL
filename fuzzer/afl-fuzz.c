@@ -2719,7 +2719,7 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
       } else {
         WARNF("Running target binary without fork server for the first time.");
         char *argv[3] = {target_path, input, NULL};
-        execv(target_path, argv);
+        execv(oracle_path, argv);
       }
 
       /* Use a distinctive bitmap value to tell the parent about execv()
@@ -2928,6 +2928,7 @@ static void show_stats(void);
 /* Calibrate a new test case. This is done when processing the input directory
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
+
 
 static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
                          u32 handicap, u8 from_queue)
@@ -5055,6 +5056,8 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
   return 0;
 
 }
+
+
 
 
 /* Helper to choose random block len for block operations in fuzz_one().
