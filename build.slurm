@@ -41,10 +41,10 @@ mkdir -p $wrap/output
 
 echo "Building llvm passes"
 rm -rf $wrap/build
-mkdir $wrap/build && cd $wrap/build
-cmake -DLLVM_DIR=$LIB_PATH/cmake/llvm \
-    -DCMAKE_BUILD_TYPE=Release \
-    .. 2>&1 | cat
+
+cmake -S $wrap/src -B $wrap/build \
+      -DLLVM_DIR=$LIB_PATH/cmake/llvm \
+      -DCMAKE_BUILD_TYPE=Release 2>&1 | cat
 make -j$(nproc)
 cd ..
 echo "Done!!"
