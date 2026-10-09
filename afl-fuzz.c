@@ -43,7 +43,6 @@
 #include "alloc-inl.h"
 #include "hash.h"
 #include "data.h"
-#include "uthash.h"
 
 #include <stdio.h>
 #include <unistd.h>

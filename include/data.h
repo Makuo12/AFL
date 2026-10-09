@@ -2,6 +2,7 @@
 #define DATA_H_
 #include <sys/types.h> // Standard POSIX types
 #include <inttypes.h>
+#include "uthash.h" // Include uthash for hash table functionality
 typedef struct
 {
     char d_name[1025];
