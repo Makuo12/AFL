@@ -746,13 +746,6 @@ static u8* DTD(u64 cur_ms, u64 event_ms) {
 
 }
 
-typedef struct
-{
-  int32_t meta_id; /* key */
-  int32_t cmp_value;
-  UT_hash_handle hh;
-} LoopThresholdEntry;
-
 static LoopThresholdEntry *loop_threshold_map = NULL;
 
 static const char *loop_threshold_path(void)

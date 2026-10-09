@@ -35,10 +35,8 @@ typedef enum
 
 typedef struct
 {
-    int32_t meta_id;   /* key: trace.index */
-    int32_t cmp_value; /* value: latest threshold written for this id */
-    UT_hash_handle hh;
+  int32_t meta_id; /* key */
+  int32_t cmp_value;
+  UT_hash_handle hh;
 } LoopThresholdEntry;
-
-extern LoopThresholdEntry *loop_threshold_map;
 #endif
