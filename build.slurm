@@ -50,7 +50,7 @@ echo "Building utils"
 $BIN_PATH/clang++ $INCLUDE  $wrap/tools/utils.cc -o $wrap/output/utils
 
 echo "Building xpdf with custom coverage tracer..."
-cd $wrap/xpdf-4.06_2
+cd $wrap/targets/xpdf-4.06_2
 rm -rf build && mkdir build
 cd build
 
