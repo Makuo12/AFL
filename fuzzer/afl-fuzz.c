@@ -2713,8 +2713,10 @@ static u8 run_target(char** argv, u32 timeout, int for_oracle) {
                              "symbolize=0:"
                              "msan_track_origins=0", 0);
       if (for_oracle) {
+        WARNF("Running oracle binary without fork server for the first time.");
         execv(oracle_path, argv);
       } else {
+        WARNF("Running target binary without fork server for the first time.");
         execv(target_path, argv);
       }
 
@@ -7443,7 +7445,11 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
     WARNF("AFL_DEFER_FORKSRV is no longer supported and may misbehave!");
 
   }
-
+  if (strcmp(target_path, oracle_path) == 0) {
+    FATAL("Target binary and oracle binary are the same. Please specify different binaries.");
+  } else {
+    WARNF("Target binary and oracle binary are different %s and %s.", target_path, oracle_path);
+  }
   if (munmap(f_data, f_len)) PFATAL("unmap() failed");
 }
 

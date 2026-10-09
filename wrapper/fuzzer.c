@@ -38,6 +38,11 @@ u8 *trace_bits; /* SHM with instrumentation bitmap  */
 
 int current_address = 0;
 
+/* Optional standalone trap-counting mode, enabled by argv[2] == "check". */
+static int check_mode = 0;
+static unsigned long long count[MAP_SIZE];
+static volatile sig_atomic_t total_trap_hits = 0;
+
 /* Maps a trap address -> index into addresses[], so repeated hits at the
    same trap site update the existing slot instead of allocating a new
    one. */
@@ -232,30 +237,34 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         return;
     }
 
-    if (current_address < MAP_SIZE)
+    /* In check mode, avoid writing trap metadata to the addresses SHM too. */
+    if (!check_mode)
     {
-        map *found = __fuzzer_find_breakpoint(hash_map, addr);
-        if (found)
+        if (current_address < MAP_SIZE)
         {
-            addresses[found->index].index = index_block;
-            addresses[found->index].cmp_value = new_value;
-            addresses[found->index].addr = addr;
-            addresses[found->index].is_edge_count = is_edge_count;
+            map *found = __fuzzer_find_breakpoint(hash_map, addr);
+            if (found)
+            {
+                addresses[found->index].index = index_block;
+                addresses[found->index].cmp_value = new_value;
+                addresses[found->index].addr = addr;
+                addresses[found->index].is_edge_count = is_edge_count;
+            }
+            else
+            {
+                __fuzzer_add_breakpoint(&hash_map, addr, current_address);
+                addresses[current_address].index = index_block;
+                addresses[current_address].cmp_value = new_value;
+                addresses[current_address].is_edge_count = is_edge_count;
+                addresses[current_address++].addr = addr;
+            }
         }
         else
         {
-            __fuzzer_add_breakpoint(&hash_map, addr, current_address);
-            addresses[current_address].index = index_block;
-            addresses[current_address].cmp_value = new_value;
-            addresses[current_address].is_edge_count = is_edge_count;
-            addresses[current_address++].addr = addr;
+            sig_log("overflow of addresses\\n");
+            raise(SIGKILL);
+            return;
         }
-    }
-    else
-    {
-        sig_log("overflow of addresses\n");
-        raise(SIGKILL);
-        return;
     }
 
 #ifdef __linux__
@@ -377,7 +386,19 @@ int main(int argc, char **argv)
     setup_shm();
     setup_signal();
     log_line("starting target_main with input file: %s\n", argv[1]);
-    char *args[] = {argv[0], argv[1], NULL};
-    int arg = sizeof(args) / sizeof(args[0]) - 1;
-    return target_main(arg, args);
+    char *args[] = {argv[0], argv[1], "/dev/null", NULL};
+    int target_argc = sizeof(args) / sizeof(args[0]) - 1;
+    int result = target_main(target_argc, args);
+    
+    if (check_mode)
+    {
+        printf("Total trap hits: %llu\\n", total_trap_hits);
+        for (int i = 0; i < MAP_SIZE; i++)
+        {
+            if (count[i] != 0)
+                printf("count[%d] = %llu\\n", i, count[i]);
+        }
+    }
+
+    return result;
 }
