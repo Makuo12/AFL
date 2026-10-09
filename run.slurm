@@ -32,7 +32,7 @@ module load LLVM/20.1.8-GCCcore-14.3.0
 
     wrap="$HOME/project/AFL"      # same as build
     cd "$wrap"                                   # makes ./fuzzer/afl-fuzz and ./output work
-    runner="$HOME/project/project_runner"
+    runner="$HOME/project/AFL/project_runner"
     mkdir -p "$runner"
 
     output="$runner/output_${ID}"                # per-task copy
