@@ -223,6 +223,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         resume_addr = addr + 5;
         is_edge_count = 0;
         trace_bits[index_block] = 1;
+        log_line("normal hit index %d, value %d\n", index_block, new_value);
     }
     else
     {

@@ -24,7 +24,7 @@ typedef struct
 } Trace;
 
 #define LOOP_START_ADD_5 5
-#define MAX_LOOP 1000
+#define MAX_LOOP 255
 #define SHM_ID "SHM_ID"
 
 typedef enum
