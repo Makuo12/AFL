@@ -42,8 +42,8 @@
 #include "debug.h"
 #include "alloc-inl.h"
 #include "hash.h"
-#include "include/data.h"
-#include "include/uthash.h"
+#include "data.h"
+#include "uthash.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -745,93 +745,119 @@ static u8* DTD(u64 cur_ms, u64 event_ms) {
   return tmp;
 
 }
-LoopThresholdEntry *loop_threshold_map = NULL;
 
-/* Insert or update the threshold for a given loop id. */
-void loop_threshold_set(int32_t meta_id, int32_t cmp_value)
+typedef struct
 {
+  int32_t meta_id; /* key */
+  int32_t cmp_value;
+  UT_hash_handle hh;
+} LoopThresholdEntry;
+
+static LoopThresholdEntry *loop_threshold_map = NULL;
+
+static const char *loop_threshold_path(void)
+{
+  const char *p = getenv("LOOP_THRESHOLD_FILE");
+  return p ? p : "./output/loop_thresholds.txt";
+}
+
+/* Insert or raise the threshold. Thresholds only grow, so a stale/lower
+   value never overwrites a newer one. */
+static void loop_threshold_set(int32_t meta_id, int32_t cmp_value)
+{
+
   LoopThresholdEntry *entry = NULL;
+
   HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
-  if (entry == NULL)
+
+  if (!entry)
   {
-    entry = (LoopThresholdEntry *)malloc(sizeof(LoopThresholdEntry));
-    if (entry == NULL)
-    {
-      perror("malloc failed for loop_threshold_map entry");
-      exit(EXIT_FAILURE);
-    }
+    entry = ck_alloc(sizeof(*entry)); /* was malloc, uninitialised */
     entry->meta_id = meta_id;
     entry->cmp_value = cmp_value;
     HASH_ADD_INT(loop_threshold_map, meta_id, entry);
   }
-  else
+  else if (cmp_value > entry->cmp_value)
   {
     entry->cmp_value = cmp_value;
   }
 }
 
-/* Look up the current threshold for a loop id. Returns 0 and sets
- * *found = 0 if the id has never been seen (caller should fall back to
- * whatever the default starting threshold is). */
-int32_t loop_threshold_get(int32_t meta_id, int *found)
+/* Returns the stored threshold, or 0 with *found = 0 if unknown. */
+static int32_t loop_threshold_get(int32_t meta_id, int *found)
 {
+
   LoopThresholdEntry *entry = NULL;
+
   HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
-  if (entry == NULL)
-  {
-    if (found)
-      *found = 0;
-    return 0;
-  }
   if (found)
-    *found = 1;
-  return entry->cmp_value;
+    *found = entry != NULL;
+  return entry ? entry->cmp_value : 0;
 }
 
-/* A loop id that has retired (hit MAX_LOOP and been stripped from the IR)
- * no longer needs tracking -- its instrumentation is gone for good, so
- * there's nothing left to resume on a future recompile. Call this once
- * DE_INSTRUMENT fires for that id so the map doesn't grow unbounded with
- * dead entries. */
-void loop_threshold_remove(int32_t meta_id)
+/* Retired id: drop it so the map doesn't hold dead entries. */
+static void loop_threshold_remove(int32_t meta_id)
 {
+
   LoopThresholdEntry *entry = NULL;
+
   HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
-  if (entry != NULL)
+  if (entry)
   {
     HASH_DEL(loop_threshold_map, entry);
-    free(entry);
+    ck_free(entry);
   }
 }
 
-void loop_threshold_clear(void)
+static void loop_threshold_clear(void)
 {
+
   LoopThresholdEntry *entry, *tmp;
+
   HASH_ITER(hh, loop_threshold_map, entry, tmp)
   {
     HASH_DEL(loop_threshold_map, entry);
-    free(entry);
+    ck_free(entry);
   }
+
   loop_threshold_map = NULL;
 }
 
-/* Dump the whole map to a file as "id,cmp_value" lines, one per still-active
- * loop counter. Meant to be called right before remove_instrumentation()
- * triggers a recompile, so the LLVM pass has a concrete, up-to-date file
- * to read and bake into each loop's initial cmp immediate. */
-void loop_threshold_dump(const char *path)
+/* Snapshot as "id,cmp_value" lines. Written to a temp file and renamed so the
+   LLVM pass never reads a half-written file. */
+static void loop_threshold_dump(void)
 {
-  FILE *fp = fopen(path, "w"); /* full rewrite each time -- this is a snapshot, not a log */
-  if (fp == NULL)
-  {
-    perror("failed to open loop_thresholds.txt for writing");
-    exit(EXIT_FAILURE);
-  }
+
+  const char *path = loop_threshold_path();
+  u8 *tmp_path = alloc_printf("%s.tmp", path);
+  FILE *fp = fopen(tmp_path, "w");
   LoopThresholdEntry *entry, *tmp;
+
+  if (!fp)
+    PFATAL("Unable to open '%s'", tmp_path);
+
   HASH_ITER(hh, loop_threshold_map, entry, tmp)
-  {
-    fprintf(fp, "%d,%d\n", entry->meta_id, entry->cmp_value);
-  }
+  fprintf(fp, "%d,%d\n", entry->meta_id, entry->cmp_value);
+
+  if (fclose(fp))
+    PFATAL("Unable to write '%s'", tmp_path);
+  if (rename(tmp_path, path))
+    PFATAL("Unable to rename '%s'", tmp_path);
+
+  ck_free(tmp_path);
+}
+
+/* Reload a previous snapshot (resume). Missing file is fine. */
+static void loop_threshold_load(void)
+{
+
+  FILE *fp = fopen(loop_threshold_path(), "r");
+  int id, cmp;
+
+  if (!fp)
+    return;
+  while (fscanf(fp, "%d,%d\n", &id, &cmp) == 2)
+    loop_threshold_set(id, cmp);
   fclose(fp);
 }
 
