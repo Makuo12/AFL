@@ -18,7 +18,7 @@ if [ "${1:-}" = "arc" ]; then
     module load GCCcore/14.3.0
     pip install --user wllvm
     export PATH="$HOME/.local/bin:$PATH"
-    wrap="$HOME/project/untracer_llvm_fork"
+    wrap="$HOME/project/AFL"
     export BASE_ADDRESS=0x400000
 else
     export LLVM_CC_NAME=clang-20        # ← pin to version 20

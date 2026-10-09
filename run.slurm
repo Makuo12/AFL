@@ -30,7 +30,7 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0}"
     FULL_ID="${PROGRAM}_${ID}"
 
-    wrap="$HOME/project/untracer_llvm_fork"      # same as build
+    wrap="$HOME/project/AFL"      # same as build
     cd "$wrap"                                   # makes ./fuzzer/afl-fuzz and ./output work
     runner="$HOME/project/project_runner"
     mkdir -p "$runner"
