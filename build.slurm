@@ -45,7 +45,7 @@ rm -rf $wrap/build
 cmake -B $wrap/build \
       -DLLVM_DIR=$LIB_PATH/cmake/llvm \
       -DCMAKE_BUILD_TYPE=Release 2>&1 | cat
-make -j$(nproc)
+make -C $wrap/build -j$(nproc)
 cd ..
 echo "Done!!"
 
