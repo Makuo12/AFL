@@ -28,7 +28,7 @@ else
 fi
 
 echo "Building afl_fuzz"
-make $wrap/fuzzer/afl-fuzz
+make -C $wrap/fuzzer afl-fuzz
 
 PERF_FLAGS="-O3 -funroll-loops -g -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden"
 
