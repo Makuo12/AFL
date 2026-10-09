@@ -210,7 +210,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         } else {
             // trace_bits[index_block] = bucket_of(new_value);
         }
-        log_line("loop counter hit index %d, value %d\n", index_block, new_value);
+        // log_line("loop counter hit index %d, value %d\n", index_block, new_value);
     }
     else if (*trap == 0xcc)
     {
@@ -227,7 +227,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         {
             // trace_bits[index_block] = 1;
         }
-        log_line("normal hit index %d, value %d\n", index_block, 1);
+        // log_line("normal hit index %d, value %d\n", index_block, 1);
     }
     else
     {
