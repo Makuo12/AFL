@@ -401,11 +401,14 @@ int main(int argc, char **argv)
     char *args[] = {argv[0], argv[1], "/dev/null", NULL};
     int arg = sizeof(args) / sizeof(args[0]) - 1;
     int result = target_main(arg, args);
-    int my_count = 0;
-    for (int i = 0; i < MAP_SIZE; i++) {
-        if (count[i] > 0) {
-            my_count++;
+    if (check) {
+        int my_count = 0;
+        for (int i = 0; i < MAP_SIZE; i++) {
+            if (count[i] > 0) {
+                my_count++;
+            }
         }
+        log_line("Number of edges covered: %d\n", my_count);
     }
-    log_line("Number of edges covered: %d\n", my_count);
+    return result;
 }
