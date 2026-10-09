@@ -46,8 +46,7 @@ cmake -B $wrap/build \
       -DLLVM_DIR=$LIB_PATH/cmake/llvm \
       -DCMAKE_BUILD_TYPE=Release 2>&1 | cat
 make -C $wrap/build -j$(nproc)
-cd ..
-echo "Done!!"
+
 
 echo "Building utils"
 $BIN_PATH/clang++ $INCLUDE  $wrap/tools/utils.cc -o $wrap/output/utils
