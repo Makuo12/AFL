@@ -54,6 +54,7 @@ if [[ "${1:-}" = "arc" ]]; then
     [ -x "$SUT_TRACE" ] || { echo "Missing trace: $SUT_TRACE" >&2; exit 1; }
 
 else
+    # run on my local linux machine
     wrap=$(pwd)
     output="$wrap/output"
 
