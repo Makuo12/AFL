@@ -1006,24 +1006,6 @@ static inline u8 bucket_of(int32_t cmp)
   return b > 255 ? 255 : (b < 0 ? 0 : b);
 }
 
-/* Deterministic projection of the hits onto trace_bits (max per index,
-   so firing order doesn't matter). */
-static void traps_to_trace(void)
-
-{
-  for (u32 i = 0; i < MAP_SIZE; i++)
-  {
-    Trace *t = &trap_addr[i];
-    if (t->addr <= 0x400000)
-      break;
-    if (t->index < 0 || t->index >= MAP_SIZE)
-      continue;
-    u8 b = t->is_edge_count ? bucket_of(t->cmp_value) : 1;
-    if (b > trace_bits[t->index])
-      trace_bits[t->index] = b;
-  }
-}
-
 /* Write bitmap to file. The bitmap is useful mostly for the secret
    -B option, to focus a separate fuzzing session on a particular
    interesting input without rediscovering all the others. */
@@ -2815,7 +2797,6 @@ static u8 run_target(char** argv, u32 timeout, int for_oracle) {
   MEM_BARRIER();
 
   tb4 = *(u32 *)trace_bits; /* keep this read first (EXEC_FAIL_SIG) */
-  traps_to_trace();
 
 #ifdef WORD_SIZE_64
   // classify_counts((u64*)trace_bits);
@@ -2992,8 +2973,9 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
     if (stop_soon || fault != crash_mode)
       goto abort_calibration;
-
-    if (!dumb_mode && !stage_cur && !count_bytes(trace_bits))
+    u32 count = count_bytes(trace_bits);
+    WARNF("calibration: %s, stage_cur: %u, count: %u", q->fname, stage_cur, count);
+    if (!dumb_mode && !stage_cur && !count)
     {
       fault = FAULT_NOINST;
       goto abort_calibration;
@@ -3001,7 +2983,7 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
 
     cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-
+    WARNF("calibration: %s, cksum: %u", q->fname, cksum);
     if (!stage_cur)
     {
 

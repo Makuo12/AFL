@@ -3,6 +3,7 @@
 #include <sys/ucontext.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdarg.h> /* va_list, used by log_line() in startup.c */
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/shm.h>
@@ -33,6 +34,8 @@ typedef unsigned char u8;
 /* ------------------------------------------------------------------ */
 
 Trace *addresses;
+u8 *trace_bits; /* SHM with instrumentation bitmap  */
+
 int current_address = 0;
 
 /* Maps a trap address -> index into addresses[], so repeated hits at the
@@ -61,12 +64,17 @@ writable_page *writable_pages = NULL;
 /* Logging helper (NOT safe to call from signal handlers)             */
 /* ------------------------------------------------------------------ */
 
-static void log_line(const char *msg)
+void log_line(const char *fmt, ...)
 {
     FILE *log_file = fopen("./output/trap_handler.log", "a");
     if (!log_file)
-        log_file = stderr;
-    fprintf(log_file, "%s", msg);
+        log_file = stderr; // fallback
+
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(log_file, fmt, ap);
+    va_end(ap);
+
     if (log_file != stderr)
         fclose(log_file);
 }
@@ -134,6 +142,12 @@ void make_range_writable(uintptr_t start, uintptr_t end)
     }
 }
 
+static inline u8 bucket_of(int32_t cmp)
+{
+    int32_t b = (cmp <= LOOP_START_ADD_5) ? cmp : 4 + cmp / 5;
+    return b > 255 ? 255 : (b < 0 ? 0 : b);
+}
+
 /* ------------------------------------------------------------------ */
 /* Signal handlers                                                    */
 /* ------------------------------------------------------------------ */
@@ -198,6 +212,8 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
             resume_addr = cmp_addr;
         }
         is_edge_count = 1;
+        trace_bits[index_block] = bucket_of(new_value);
+        log_line("loop counter hit index %d, value %d\n", index_block, new_value);
     }
     else if (*trap == 0xcc)
     {
@@ -206,6 +222,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         memset(trap, 0x90, 5);
         resume_addr = addr + 5;
         is_edge_count = 0;
+        trace_bits[index_block] = 1;
     }
     else
     {
@@ -311,6 +328,33 @@ void setup_shm(void)
 
     addresses = (Trace *)shmat((int)id, NULL, 0);
     if (addresses == (Trace *)-1)
+    {
+        log_line("shmat error\n");
+        exit(EXIT_FAILURE);
+    }
+
+    const char *trace_env = getenv(SHM_ENV_VAR);
+    if (trace_env == NULL)
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "%s not set\n", SHM_ENV_VAR);
+        log_line(msg);
+        exit(EXIT_FAILURE);
+    }
+
+    errno = 0;
+    endptr = NULL;
+    long trace_id = strtol(trace_env, &endptr, 10);
+    if (errno != 0 || endptr == trace_env || *endptr != '\0' || trace_id < 0)
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "invalid %s value: %s\n", SHM_ENV_VAR, env);
+        log_line(msg);
+        exit(EXIT_FAILURE);
+    }
+
+    trace_bits = (u8 *)shmat((int)trace_id, NULL, 0);
+    if (trace_bits == (u8 *)-1)
     {
         log_line("shmat error\n");
         exit(EXIT_FAILURE);
