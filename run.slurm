@@ -16,31 +16,35 @@ export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 export AFL_SKIP_CPUFREQ=1
 export AFL_NO_UI=1
 export AFL_NO_FORKSRV=1  
+export AFL_NO_AFFINITY=1
 
-FUZZ_SECONDS=$((2 * 3600))
+FUZZ_SECONDS=$((120))
 TRACE="main.trace"
 ORACLE="main.oracle"
+PROGRAM="project_afl"
 
 if [[ "${1:-}" = "arc" ]]; then
-    module load LLVM/20.1.8-GCCcore-14.3.0
+module load LLVM/20.1.8-GCCcore-14.3.0
     module load GCCcore/14.3.0
 
     ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0}"
     FULL_ID="${PROGRAM}_${ID}"
 
-    wrap="$HOME/project"
-    runner=$wrap/project_runner
+    wrap="$HOME/project/untracer_llvm_fork"      # same as build
+    cd "$wrap"                                   # makes ./fuzzer/afl-fuzz and ./output work
+    runner="$HOME/project/project_runner"
     mkdir -p "$runner"
 
-    output="$runner/project_output_${ID}"
+    output="$runner/output_${ID}"                # per-task copy
     rm -rf "$output"
-    cp -r "$wrap/project_output" "$output"
+    mkdir -p "$output"
+    cp -r "$wrap/output/." "$output/"      # everything: binaries, .bc, .ll, edge, remove_edge, ...
 
     tmp_base="${TMPDIR:-/tmp}"
     tmp_input="$tmp_base/project_${FULL_ID}"
     OUTROOT="$tmp_base/$FULL_ID"            # node-local fuzzer output (wiped at job end)
     RESULTS_DIR="$output/results"             # persistent results
-
+    export LOOP_THRESHOLD_FILE="$OUTROOT/loop_threshold.txt"
     SUT_ORACLE="$output/$ORACLE"
     SUT_TRACE="$output/$TRACE"
     SUT_ARGS=(@@ /dev/null)
@@ -56,10 +60,13 @@ if [[ "${1:-}" = "arc" ]]; then
 else
     # run on my local linux machine
     wrap=$(pwd)
-    output="$wrap/output"
 
     ID="local_$(date +%s)_$$"
     FULL_ID="${PROGRAM:-project}_${ID}"
+
+    output="$wrap/output_$ID"
+    mkdir -p "$output"
+    cp -r "$wrap/output/." "$output/"
 
     tmp_base="/tmp"
     tmp_input="$tmp_base/project_${FULL_ID}"
@@ -73,6 +80,7 @@ else
     mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR"
     cp -rf "$wrap/testcases/pdf/." "$tmp_input/"
     SEED_DIR="$tmp_input"
+    export LOOP_THRESHOLD_FILE="./output/loop_threshold.txt"
 
     [ -d "$SEED_DIR" ] || { echo "Missing seed dir: $SEED_DIR" >&2; exit 1; }
     [ -x "$SUT_ORACLE" ] || { echo "Missing oracle: $SUT_ORACLE" >&2; exit 1; }
@@ -88,18 +96,16 @@ export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
-    ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" -V "$FUZZ_SECONDS" \
-    -t 60 -b "$CPU" -m 1536 -- \
-    "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
+    -t 1000 -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
-    ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" -V "$FUZZ_SECONDS" \
-    -t 60 -b "$CPU" -m 1536 -- \
-    "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
+    -t 1000 -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 
-if [ -f "$OUTROOT/default/fuzzer_stats" ]; then
-  cp "$OUTROOT/default/fuzzer_stats" "$RESULTS_DIR/fuzzer_stats_$FULL_ID"
+if [ -f "$OUTROOT/fuzzer_stats" ]; then
+  cp "$OUTROOT/fuzzer_stats" "$RESULTS_DIR/fuzzer_stats_$FULL_ID"
 fi
 
 # Tar from the parent so the archive contains only "$FULL_ID/..."
