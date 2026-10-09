@@ -29,6 +29,8 @@ extern int target_main(int argc, char **argv);
 
 typedef unsigned char u8;
 
+int check = 0;
+
 /* ------------------------------------------------------------------ */
 /* Globals                                                            */
 /* ------------------------------------------------------------------ */
@@ -36,12 +38,9 @@ typedef unsigned char u8;
 Trace *addresses;
 u8 *trace_bits; /* SHM with instrumentation bitmap  */
 
-int current_address = 0;
+u8 count[MAP_SIZE]; /* SHM with instrumentation bitmap  */
 
-/* Optional standalone trap-counting mode, enabled by argv[2] == "check". */
-static int check_mode = 0;
-static unsigned long long count[MAP_SIZE];
-static volatile sig_atomic_t total_trap_hits = 0;
+int current_address = 0;
 
 /* Maps a trap address -> index into addresses[], so repeated hits at the
    same trap site update the existing slot instead of allocating a new
@@ -217,7 +216,11 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
             resume_addr = cmp_addr;
         }
         is_edge_count = 1;
-        trace_bits[index_block] = bucket_of(new_value);
+        if (check) {
+            count[index_block] = new_value;
+        } else {
+            trace_bits[index_block] = bucket_of(new_value);
+        }
         log_line("loop counter hit index %d, value %d\n", index_block, new_value);
     }
     else if (*trap == 0xcc)
@@ -227,7 +230,14 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         memset(trap, 0x90, 5);
         resume_addr = addr + 5;
         is_edge_count = 0;
-        trace_bits[index_block] = 1;
+        if (check)
+        {
+            count[index_block] = 1;
+        }
+        else
+        {
+            trace_bits[index_block] = 1;
+        }
         log_line("normal hit index %d, value %d\n", index_block, 1);
     }
     else
@@ -237,9 +247,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         return;
     }
 
-    /* In check mode, avoid writing trap metadata to the addresses SHM too. */
-    if (!check_mode)
-    {
+    if (!check) {
         if (current_address < MAP_SIZE)
         {
             map *found = __fuzzer_find_breakpoint(hash_map, addr);
@@ -261,7 +269,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         }
         else
         {
-            sig_log("overflow of addresses\\n");
+            sig_log("overflow of addresses\n");
             raise(SIGKILL);
             return;
         }
@@ -382,23 +390,22 @@ int main(int argc, char **argv)
         log_line("usage: harness <input_file>\n");
         exit(EXIT_FAILURE);
     }
-
-    setup_shm();
+    if (argc >= 3 && strcmp(argv[2], "check") == 0) {
+        check = 1;
+    }
+    if (!check) {
+        setup_shm();
+    }
     setup_signal();
     log_line("starting target_main with input file: %s\n", argv[1]);
     char *args[] = {argv[0], argv[1], "/dev/null", NULL};
-    int target_argc = sizeof(args) / sizeof(args[0]) - 1;
-    int result = target_main(target_argc, args);
-    
-    if (check_mode)
-    {
-        printf("Total trap hits: %llu\\n", total_trap_hits);
-        for (int i = 0; i < MAP_SIZE; i++)
-        {
-            if (count[i] != 0)
-                printf("count[%d] = %llu\\n", i, count[i]);
+    int arg = sizeof(args) / sizeof(args[0]) - 1;
+    int result = target_main(arg, args);
+    int my_count = 0;
+    for (int i = 0; i < MAP_SIZE; i++) {
+        if (count[i] > 0) {
+            my_count++;
         }
     }
-
-    return result;
+    log_line("Number of edges covered: %d\n", my_count);
 }

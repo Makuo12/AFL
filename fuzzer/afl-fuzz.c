@@ -2622,7 +2622,7 @@ EXP_ST void init_forkserver(char** argv) {
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
-static u8 run_target(char** argv, u32 timeout, int for_oracle) {
+static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
 
   static struct itimerval it;
   static u32 prev_timed_out = 0;
@@ -2714,9 +2714,11 @@ static u8 run_target(char** argv, u32 timeout, int for_oracle) {
                              "msan_track_origins=0", 0);
       if (for_oracle) {
         WARNF("Running oracle binary without fork server for the first time.");
+        char *argv[3] = {oracle_path, input, NULL};
         execv(oracle_path, argv);
       } else {
         WARNF("Running target binary without fork server for the first time.");
+        char *argv[3] = {target_path, input, NULL};
         execv(target_path, argv);
       }
 
