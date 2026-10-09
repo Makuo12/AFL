@@ -7402,7 +7402,8 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
 #endif /* ^!__APPLE__ */
 
   if (!qemu_mode && !dumb_mode &&
-      !memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
+      !memmem(f_data, f_len, SHM_ID, strlen(SHM_ID) + 1))
+  {
 
     SAYF("\n" cLRD "[-] " cRST
          "Looks like the target binary is not instrumented! The fuzzer depends on\n"
@@ -7418,20 +7419,19 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
          doc_path);
 
     FATAL("No instrumentation detected");
-
   }
 
-  if (qemu_mode &&
-      memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
+  // if (qemu_mode &&
+  //     memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
 
-    SAYF("\n" cLRD "[-] " cRST
-         "This program appears to be instrumented with afl-gcc, but is being run in\n"
-         "    QEMU mode (-Q). This is probably not what you want - this setup will be\n"
-         "    slow and offer no practical benefits.\n");
+  //   SAYF("\n" cLRD "[-] " cRST
+  //        "This program appears to be instrumented with afl-gcc, but is being run in\n"
+  //        "    QEMU mode (-Q). This is probably not what you want - this setup will be\n"
+  //        "    slow and offer no practical benefits.\n");
 
-    FATAL("Instrumentation found in -Q mode");
+  //   FATAL("Instrumentation found in -Q mode");
 
-  }
+  // }
 
   if (memmem(f_data, f_len, "libasan.so", 10) ||
       memmem(f_data, f_len, "__msan_init", 11)) uses_asan = 1;
