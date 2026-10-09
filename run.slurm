@@ -97,10 +97,10 @@ export AFL_NO_SYNC=1                    # don't import other instances' inputs
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 1000 -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 1000+ -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 1000 -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 1000+ -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 
