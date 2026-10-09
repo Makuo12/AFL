@@ -18,7 +18,7 @@ export AFL_NO_UI=1
 export AFL_NO_FORKSRV=1  
 export AFL_NO_AFFINITY=1
 
-FUZZ_SECONDS=$((5*60))
+FUZZ_SECONDS=$((1*60*60))
 TRACE="main.trace"
 ORACLE="main.oracle"
 PROGRAM="project_afl"
