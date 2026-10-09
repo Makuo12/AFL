@@ -223,7 +223,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         resume_addr = addr + 5;
         is_edge_count = 0;
         trace_bits[index_block] = 1;
-        log_line("normal hit index %d, value %d\n", index_block, new_value);
+        log_line("normal hit index %d, value %d\n", index_block, 1);
     }
     else
     {
@@ -376,7 +376,7 @@ int main(int argc, char **argv)
 
     setup_shm();
     setup_signal();
-
+    log_line("starting target_main with input file: %s\n", argv[1]);
     char *args[] = {argv[0], argv[1], NULL};
     int arg = sizeof(args) / sizeof(args[0]) - 1;
     return target_main(arg, args);
