@@ -83,17 +83,6 @@ void log_line(const char *fmt, ...)
         fclose(log_file);
 }
 
-/* ------------------------------------------------------------------ */
-/* Async-signal-safe logging, for use inside signal handlers          */
-/* ------------------------------------------------------------------ */
-
-static void sig_log(const char *msg)
-{
-    /* write() is async-signal-safe; fopen/fprintf/fclose are not. */
-    size_t len = strlen(msg);
-    ssize_t ignored = write(STDERR_FILENO, msg, len);
-    (void)ignored;
-}
 
 /* ------------------------------------------------------------------ */
 /* Breakpoint map helpers                                             */
@@ -170,7 +159,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
 
     if (addr < 0x400000)
     {
-        sig_log("addr underflow, base address assumption wrong\n");
+        log_line("addr underflow, base address assumption wrong\n");
         raise(SIGKILL);
         return;
     }
@@ -242,7 +231,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
     }
     else
     {
-        sig_log("failed to decode trap at unexpected address\n");
+        log_line("failed to decode trap at unexpected address\n");
         raise(SIGKILL);
         return;
     }
@@ -269,7 +258,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         }
         else
         {
-            sig_log("overflow of addresses\n");
+            log_line("overflow of addresses\n");
             raise(SIGKILL);
             return;
         }
@@ -285,18 +274,12 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
     return;
 }
 
-void illegal_instruction_handler(int sig, siginfo_t *info, void *context)
-{
-    sig_log("SIGILL\n");
-    raise(SIGKILL);
-}
-
 void crash_handler(int sig, siginfo_t *info, void *ctx)
 {
     ucontext_t *uc = (ucontext_t *)ctx;
+    uintptr_t rip = uc->uc_mcontext.gregs[REG_RIP];
     if (trace_bits)
     {
-        uintptr_t rip = uc->uc_mcontext.gregs[REG_RIP];
         /* Outside the main image (libc etc.) the address moves with ASLR,
            so keep only the page offset, which is stable. */
         if (rip < 0x400000 || rip > 0x10000000)
@@ -304,7 +287,7 @@ void crash_handler(int sig, siginfo_t *info, void *ctx)
         trace_bits[1] = (uint32_t)rip;
         trace_bits[2] = (uint32_t)sig;
     }
-    sig_log("fatal signal\n");
+    log_line("fatal signal %lx\n", rip);
     raise(SIGKILL);
 }
 
@@ -398,26 +381,21 @@ int main(int argc, char **argv)
         log_line("usage: harness <input_file>\n");
         exit(EXIT_FAILURE);
     }
-    if (argc >= 3 && strcmp(argv[2], "check") == 0) {
-        check = 1;
-    }
-    if (!check) {
-        setup_shm();
-    }
+    setup_shm();
     setup_signal();
-    log_line("starting target_main with input file: %s\n", argv[1]);
+    // log_line("starting target_main with input file: %s\n", argv[1]);
     char *args[] = {argv[0], argv[1], "/dev/null", NULL};
     int arg = sizeof(args) / sizeof(args[0]) - 1;
     int result = target_main(arg, args);
-    if (check) {
-        int my_count = 0;
-        for (int i = 0; i < MAP_SIZE; i++) {
-            if (count[i] > 0) {
-                my_count++;
-            }
-        }
-        log_line("Number of edges covered: %d\n", my_count);
-    }
+    // if (check) {
+    //     int my_count = 0;
+    //     for (int i = 0; i < MAP_SIZE; i++) {
+    //         if (count[i] > 0) {
+    //             my_count++;
+    //         }
+    //     }
+    //     log_line("Number of edges covered: %d\n", my_count);
+    // }
     trace_bits[0] = current_address;
     return result;
 }
