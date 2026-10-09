@@ -90,7 +90,7 @@ echo "Disassembling bitcode to LLVM IR"
 llvm-dis $wrap/output/out.bc -o $wrap/output/out.ll
 
 echo "Make target init"
-$BIN_PATH/clang++ -I $wrap/include -emit-llvm $wrap/wrapper/fuzzer.c -o $wrap/output/fuzzer.bc
+$BIN_PATH/clang++ -I $wrap/include -c -emit-llvm $wrap/wrapper/fuzzer.c -o $wrap/output/fuzzer.bc
 
 echo "Building edge-only binary"
 $BIN_PATH/clang++ $wrap/src/EdgeCount.cc $wrap/src/EdgeHandler.cc \
