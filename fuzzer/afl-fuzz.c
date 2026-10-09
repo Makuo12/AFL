@@ -3251,7 +3251,7 @@ static void perform_dry_run(char** argv) {
 
       case FAULT_NOINST:
 
-        FATAL("No instrumentation detected");
+        WRANF("No instrumentation detected");
 
       case FAULT_NOBITS: 
 
