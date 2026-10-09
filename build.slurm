@@ -110,18 +110,18 @@ echo "Building final binary"
 if [[ "$(uname -s)" == "Darwin" ]]; then
     INCLUDE="-isysroot $(xcrun --show-sdk-path)"
     $BIN_PATH/clang++  $INCLUDE  \
-        $wrap/output/main.transformed.ll $wrap/wrapper/build/fuzzer.bc \
+        $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
         -L/opt/homebrew/opt/fontconfig/lib -lfontconfig \
         -o $wrap/output/main.trace
     cp $wrap/output/main.trace $wrap/output/main.oracle
 elif [[ "$(uname -s)" == "Linux" ]]; then
     if [[ "${1:-}" = arc ]]; then
-        $BIN_PATH/clang++ -O3 $wrap/output/main.transformed.ll $wrap/wrapper/build/fuzzer.bc \
+        $BIN_PATH/clang++ -O3 $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
             -o $wrap/output/main.trace
     else
-        $BIN_PATH/clang++ -O3 $wrap/output/main.transformed.ll $wrap/wrapper/build/fuzzer.bc \
+        $BIN_PATH/clang++ -O3 $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
             -no-pie \
             -o $wrap/output/main.trace
     fi
