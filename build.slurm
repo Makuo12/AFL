@@ -27,6 +27,9 @@ else
     export BASE_ADDRESS=0x400000
 fi
 
+echo "Building afl_fuzz"
+make afl-fuzz
+
 PERF_FLAGS="-O3 -funroll-loops -g -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden"
 
 LIB_PATH="$(llvm-config --libdir)"
@@ -136,7 +139,5 @@ else
     exit 1
 fi
 
-echo "Building afl_fuzz"
-make afl-fuzz
 
 echo "Done with build"

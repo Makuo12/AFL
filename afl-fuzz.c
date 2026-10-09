@@ -745,7 +745,95 @@ static u8* DTD(u64 cur_ms, u64 event_ms) {
   return tmp;
 
 }
+LoopThresholdEntry *loop_threshold_map = NULL;
 
+/* Insert or update the threshold for a given loop id. */
+void loop_threshold_set(int32_t meta_id, int32_t cmp_value)
+{
+  LoopThresholdEntry *entry = NULL;
+  HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
+  if (entry == NULL)
+  {
+    entry = (LoopThresholdEntry *)malloc(sizeof(LoopThresholdEntry));
+    if (entry == NULL)
+    {
+      perror("malloc failed for loop_threshold_map entry");
+      exit(EXIT_FAILURE);
+    }
+    entry->meta_id = meta_id;
+    entry->cmp_value = cmp_value;
+    HASH_ADD_INT(loop_threshold_map, meta_id, entry);
+  }
+  else
+  {
+    entry->cmp_value = cmp_value;
+  }
+}
+
+/* Look up the current threshold for a loop id. Returns 0 and sets
+ * *found = 0 if the id has never been seen (caller should fall back to
+ * whatever the default starting threshold is). */
+int32_t loop_threshold_get(int32_t meta_id, int *found)
+{
+  LoopThresholdEntry *entry = NULL;
+  HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
+  if (entry == NULL)
+  {
+    if (found)
+      *found = 0;
+    return 0;
+  }
+  if (found)
+    *found = 1;
+  return entry->cmp_value;
+}
+
+/* A loop id that has retired (hit MAX_LOOP and been stripped from the IR)
+ * no longer needs tracking -- its instrumentation is gone for good, so
+ * there's nothing left to resume on a future recompile. Call this once
+ * DE_INSTRUMENT fires for that id so the map doesn't grow unbounded with
+ * dead entries. */
+void loop_threshold_remove(int32_t meta_id)
+{
+  LoopThresholdEntry *entry = NULL;
+  HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
+  if (entry != NULL)
+  {
+    HASH_DEL(loop_threshold_map, entry);
+    free(entry);
+  }
+}
+
+void loop_threshold_clear(void)
+{
+  LoopThresholdEntry *entry, *tmp;
+  HASH_ITER(hh, loop_threshold_map, entry, tmp)
+  {
+    HASH_DEL(loop_threshold_map, entry);
+    free(entry);
+  }
+  loop_threshold_map = NULL;
+}
+
+/* Dump the whole map to a file as "id,cmp_value" lines, one per still-active
+ * loop counter. Meant to be called right before remove_instrumentation()
+ * triggers a recompile, so the LLVM pass has a concrete, up-to-date file
+ * to read and bake into each loop's initial cmp immediate. */
+void loop_threshold_dump(const char *path)
+{
+  FILE *fp = fopen(path, "w"); /* full rewrite each time -- this is a snapshot, not a log */
+  if (fp == NULL)
+  {
+    perror("failed to open loop_thresholds.txt for writing");
+    exit(EXIT_FAILURE);
+  }
+  LoopThresholdEntry *entry, *tmp;
+  HASH_ITER(hh, loop_threshold_map, entry, tmp)
+  {
+    fprintf(fp, "%d,%d\n", entry->meta_id, entry->cmp_value);
+  }
+  fclose(fp);
+}
 
 /* Mark deterministic checks as done for a particular queue entry. We use the
    .state file to avoid repeating deterministic fuzzing when resuming aborted
