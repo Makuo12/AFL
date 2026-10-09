@@ -2952,7 +2952,7 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
   q->cal_failed++;
 
   stage_name = "calibration";
-  stage_max = fast_cal ? 3 : CAL_CYCLES;
+  stage_max = 1;
 
   if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
     init_forkserver(argv);
