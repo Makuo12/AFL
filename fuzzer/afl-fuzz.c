@@ -2973,7 +2973,7 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
     write_to_testcase(use_mem, q->len);
 
-    fault = run_target(argv, use_tmout, 0); /* target_path */
+    fault = run_target(argv, use_tmout, out_file, 0); /* target_path */
 
     if (stop_soon || fault != crash_mode)
       goto abort_calibration;
@@ -3584,7 +3584,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
          full trace to classify it with. */
 
       write_to_testcase(mem, len);
-      retrace_fault = run_target(argv, hang_tmout, 0);
+      retrace_fault = run_target(argv, hang_tmout, out_file, 0);
 
       if (stop_soon)
         return keeping;
@@ -3647,7 +3647,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
         u8 cf;
 
         write_to_testcase(mem, len);
-        cf = run_target(argv, exec_tmout, 0);
+        cf = run_target(argv, exec_tmout, out_file, 0);
 
         if (stop_soon)
           return keeping;
@@ -4928,7 +4928,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf) {
 
       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-      fault = run_target(argv, exec_tmout, 0); /* target_path - needs comparable full trace */
+      fault = run_target(argv, exec_tmout, out_file, 0); /* target_path - needs comparable full trace */
       trim_execs++;
 
       if (stop_soon || fault == FAULT_ERROR) goto abort_trimming;
@@ -5021,7 +5021,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   write_to_testcase(out_buf, len);
 
-  fault = run_target(argv, exec_tmout, 1);
+  fault = run_target(argv, exec_tmout, out_file, 1);
 
   if (stop_soon) return 1;
 
@@ -5522,7 +5522,7 @@ static u8 fuzz_one(char** argv) {
   write_to_testcase(out_buf, len);
 
   {
-    u8 base_fault = run_target(argv, exec_tmout, 1);
+    u8 base_fault = run_target(argv, exec_tmout, out_file, 1);
 
     if (stop_soon)
     {
@@ -7173,7 +7173,7 @@ static void sync_fuzzers(char** argv) {
 
         write_to_testcase(mem, st.st_size);
 
-        fault = run_target(argv, exec_tmout, 1); /* oracle_path, same as common_fuzz_stuff */
+        fault = run_target(argv, exec_tmout, out_file, 1); /* oracle_path, same as common_fuzz_stuff */
 
         if (stop_soon) return;
 
