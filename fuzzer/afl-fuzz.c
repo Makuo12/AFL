@@ -282,7 +282,6 @@ static void record_meta_index(int32_t index) {
 
   // u32 bitmap_size,                    /* Number of bits set in bitmap     */
   u32 exec_cksum;                     /* Checksum of the execution trace  */
-  u32 score_changed;
 
   u64 exec_us,                        /* Execution time (us)              */
       handicap,                       /* Number of queue cycles behind    */
@@ -1137,10 +1136,12 @@ static u8 handle_new_coverage(void)
 
   u8 ret = 0;
   u32 n;
-
+  u32 n_max = trace_bits[0]; /* e.g. 3 */
+  if (n_max > MAP_SIZE)      /* false for any normal run */
+    n_max = MAP_SIZE;
   /* Pass 1: decide and patch the oracle. Compare against the maps as they
      were on entry, so processing order doesn't matter. */
-  for (n = 0; n < trace_bits[0]; n++)
+  for (n = 0; n < n_max; n++)
   {
     Trace *t = &trap_addr[n];
 
@@ -1423,7 +1424,8 @@ EXP_ST void setup_shm(void) {
 
   ck_free(shm_str);
 
-  trace_bits = shmat(shm_id, NULL, 0);
+  trace_bits = (uint32_t *)shmat((int)shm_id, NULL, 0);
+
 
   shm_trap_id = shmget(IPC_PRIVATE, MAP_SIZE * sizeof(Trace), IPC_CREAT | 0600);
   if (shm_trap_id == -1)
@@ -2348,7 +2350,7 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
      territory. */
 
   // clear_traps(); /* before the run, next to memset(trace_bits) */
-  memset(trace_bits, 0, 3);
+  memset(trace_bits, 0, 3 * sizeof(u32));
   MEM_BARRIER();
 
   /* If we're running in "dumb" mode, we can't rely on the fork server
@@ -2631,17 +2633,11 @@ static void show_stats(void);
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
 
-static start_up(char **argv, struct queue_entry *q, u8 *use_mem,
-                u32 handicap, u8 from_queue)
-{
-  
-}
-
 static u8 calibrate_case_handle(char **argv, struct queue_entry *q, u8 *use_mem,
                          u32 handicap, u8 from_queue)
 {
 
-  u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
+  u8 fault = 0, new_bits = 0, hnb = 0,
      first_run = (q->exec_cksum == 0);
 
   u64 main_start_us, inner_start_us, stop_us;
@@ -2669,7 +2665,6 @@ static u8 calibrate_case_handle(char **argv, struct queue_entry *q, u8 *use_mem,
     if (hnb > new_bits)
       new_bits = hnb;
 
-    var_detected = 1;
   }
 
   stop_us = get_cur_time_us();
@@ -2678,7 +2673,7 @@ static u8 calibrate_case_handle(char **argv, struct queue_entry *q, u8 *use_mem,
   total_cal_cycles += stage_max;
 
   q->exec_us = (stop_us - inner_start_us);
-  q->score_changed = 1;
+  score_changed = 1;
   // q->bitmap_size = trace_bits[0];
   q->handicap = handicap;
   q->cal_failed = 0;
@@ -2701,15 +2696,6 @@ abort_calibration:
     queued_with_cov++;
   }
 
-  if (var_detected)
-  {
-    var_byte_count = count_bytes(var_bytes);
-    if (!q->var_behavior)
-    {
-      mark_as_variable(q);
-      queued_variable++;
-    }
-  }
 
   stage_name = old_sn;
   stage_cur = old_sc;
@@ -3295,6 +3281,26 @@ static void write_crash_readme(void) {
 
 }
 
+/* Returns 1 if this crash site hasn't been seen before. */
+static u8 crash_is_new(void)
+{
+
+  static u64 seen[8192];
+  static u32 n_seen;
+
+  u64 key = ((u64)trace_bits[2] << 32) | trace_bits[1];
+
+  if (!key)
+    return 1; /* no site info: keep, still capped by KEEP_UNIQUE_CRASH */
+
+  for (u32 i = 0; i < n_seen; i++)
+    if (seen[i] == key)
+      return 0;
+
+  if (n_seen < 8192)
+    seen[n_seen++] = key;
+  return 1;
+}
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
@@ -3339,7 +3345,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     /* exec_cksum left at 0 on purpose - calibrate_case sets it from a
        target_path run, which is the only trace we want it derived from. */
 
-    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
+    res = calibrate_case_handle(argv, queue_top, mem, queue_cycle - 1, 0);
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
@@ -3396,8 +3402,11 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 //       simplify_trace((u32 *)trace_bits);
 // #endif
 
-      if (!has_new_bits(virgin_tmout))
+      if (!crash_is_new())
         return keeping;
+
+      if (trace_bits[2])
+        kill_signal = trace_bits[2]; /* real signal, not 9 */
     }
 
     unique_tmouts++;
@@ -3458,8 +3467,11 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 //       simplify_trace((u32 *)trace_bits);
 // #endif
 
-      if (!has_new_bits(virgin_crash))
+      if (!crash_is_new())
         return keeping;
+
+      if (trace_bits[2])
+        kill_signal = trace_bits[2]; /* real signal, not 9 */
     }
 
     if (!unique_crashes)
@@ -4905,7 +4917,7 @@ static u32 choose_block_len(u32 limit) {
 static u32 calculate_score(struct queue_entry* q) {
 
   u32 avg_exec_us = total_cal_us / total_cal_cycles;
-  u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
+  // u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
   u32 perf_score = 100;
 
   /* Adjust score based on execution speed of this path, compared to the
@@ -5256,7 +5268,7 @@ static u8 fuzz_one(char** argv) {
 
       queue_cur->exec_cksum = 0;
 
-      res = calibrate_case(argv, queue_cur, in_buf, queue_cycle - 1, 0);
+      res = calibrate_case_handle(argv, queue_cur, in_buf, queue_cycle - 1, 0);
 
       if (res == FAULT_ERROR)
         FATAL("Unable to execute target application");
@@ -5302,6 +5314,8 @@ static u8 fuzz_one(char** argv) {
    *********************/
 
   orig_perf = perf_score = calculate_score(queue_cur);
+
+  goto havoc_stage;
 
   /* Skip right away if -d is given, if we have done deterministic fuzzing on
      this entry ourselves (was_fuzzed), or if it has gone through deterministic
@@ -8193,7 +8207,7 @@ int main(int argc, char** argv) {
 
   setup_post();
   setup_shm();
-  init_count_class16();
+  // init_count_class16();
 
   setup_dirs_fds();
   read_testcases();

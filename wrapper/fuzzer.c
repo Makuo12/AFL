@@ -291,9 +291,20 @@ void illegal_instruction_handler(int sig, siginfo_t *info, void *context)
     raise(SIGKILL);
 }
 
-void segfault_handler(int sig, siginfo_t *info, void *context)
+void crash_handler(int sig, siginfo_t *info, void *ctx)
 {
-    sig_log("SIGSEGV\n");
+    ucontext_t *uc = (ucontext_t *)ctx;
+    if (trace_bits)
+    {
+        uintptr_t rip = uc->uc_mcontext.gregs[REG_RIP];
+        /* Outside the main image (libc etc.) the address moves with ASLR,
+           so keep only the page offset, which is stable. */
+        if (rip < 0x400000 || rip > 0x10000000)
+            rip &= 0xfff;
+        trace_bits[1] = (uint32_t)rip;
+        trace_bits[2] = (uint32_t)sig;
+    }
+    sig_log("fatal signal\n");
     raise(SIGKILL);
 }
 
@@ -307,15 +318,11 @@ void setup_signal()
     sa.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigaction(SIGTRAP, &sa, NULL);
 
-    // SIGSEGV handler
-    sa.sa_sigaction = segfault_handler;
+    int sigs[] = {SIGSEGV, SIGILL, SIGBUS, SIGFPE, SIGABRT};
+    sa.sa_sigaction = crash_handler;
     sa.sa_flags = SA_SIGINFO | SA_NODEFER;
-    sigaction(SIGSEGV, &sa, NULL);
-
-    // SIGILL
-    sa.sa_sigaction = illegal_instruction_handler;
-    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
-    sigaction(SIGILL, &sa, NULL);
+    for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++)
+        sigaction(sigs[i], &sa, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -371,7 +378,8 @@ void setup_shm(void)
         exit(EXIT_FAILURE);
     }
 
-    trace_bits = (u8 *)shmat((int)trace_id, NULL, 0);
+    trace_bits = (uint32_t *)shmat((int)trace_id, NULL, 0);
+
     if (trace_bits == (u8 *)-1)
     {
         log_line("shmat error\n");
