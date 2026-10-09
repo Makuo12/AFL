@@ -2720,6 +2720,7 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
         WARNF("Running target binary without fork server for the first time.");
         char *argv[3] = {target_path, input, NULL};
         execv(oracle_path, argv);
+        
       }
 
       /* Use a distinctive bitmap value to tell the parent about execv()
