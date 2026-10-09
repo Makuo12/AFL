@@ -116,12 +116,12 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     cp $wrap/output/main.trace $wrap/output/main.oracle
 elif [[ "$(uname -s)" == "Linux" ]]; then
     if [[ "${1:-}" = arc ]]; then
-        $BIN_PATH/clang++ -O3 $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
+        $BIN_PATH/clang++ $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
             -o $wrap/output/main.trace
     else
-        $BIN_PATH/clang++ -O3 $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
+        $BIN_PATH/clang++ $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
             -no-pie \
             -o $wrap/output/main.trace
     fi
