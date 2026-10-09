@@ -42,6 +42,8 @@
 #include "debug.h"
 #include "alloc-inl.h"
 #include "hash.h"
+#include "include/data.h"
+#include "include/uthash.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -100,7 +102,10 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *in_bitmap,                 /* Input bitmap                     */
           *doc_path,                  /* Path to documentation dir        */
           *target_path,               /* Path to target binary            */
+          *oracle_path,               /* Path to target binary            */
           *orig_cmdline;              /* Original command line            */
+
+Trace *trap_addr;
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 static u32 hang_tmout = EXEC_TIMEOUT; /* Timeout used for hang det (ms)   */
@@ -156,28 +161,30 @@ EXP_ST u8  virgin_bits[MAP_SIZE],     /* Regions yet untouched by fuzzing */
 
 static u8  var_bytes[MAP_SIZE];       /* Bytes that appear to be variable */
 
-static s32 shm_id;                    /* ID of the SHM region             */
+static s32 shm_id, shm_trap_id;                    /* ID of the SHM region             */
 
 static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    clear_screen = 1,  /* Window resized?                  */
                    child_timed_out;   /* Traced process timed out?        */
 
-EXP_ST u32 queued_paths,              /* Total number of queued testcases */
-           queued_variable,           /* Testcases with variable behavior */
-           queued_at_start,           /* Total number of initial inputs   */
-           queued_discovered,         /* Items discovered during this run */
-           queued_imported,           /* Items imported via -S            */
-           queued_favored,            /* Paths deemed favorable           */
-           queued_with_cov,           /* Paths with new coverage bytes    */
-           pending_not_fuzzed,        /* Queued but not done yet          */
-           pending_favored,           /* Pending favored paths            */
-           cur_skipped_paths,         /* Abandoned inputs in cur cycle    */
-           cur_depth,                 /* Current path depth               */
-           max_depth,                 /* Max path depth                   */
-           useless_at_start,          /* Number of useless starting paths */
-           var_byte_count,            /* Bitmap bytes with var behavior   */
-           current_entry,             /* Current queue entry ID           */
-           havoc_div = 1;             /* Cycle count divisor for havoc    */
+u8 DE_INSTRUMENTED = 0;                            /* De-instrumented binary if set to 1             */
+
+    EXP_ST u32 queued_paths, /* Total number of queued testcases */
+    queued_variable,         /* Testcases with variable behavior */
+    queued_at_start,         /* Total number of initial inputs   */
+    queued_discovered,       /* Items discovered during this run */
+    queued_imported,         /* Items imported via -S            */
+    queued_favored,          /* Paths deemed favorable           */
+    queued_with_cov,         /* Paths with new coverage bytes    */
+    pending_not_fuzzed,      /* Queued but not done yet          */
+    pending_favored,         /* Pending favored paths            */
+    cur_skipped_paths,       /* Abandoned inputs in cur cycle    */
+    cur_depth,               /* Current path depth               */
+    max_depth,               /* Max path depth                   */
+    useless_at_start,        /* Number of useless starting paths */
+    var_byte_count,          /* Bitmap bytes with var behavior   */
+    current_entry,           /* Current queue entry ID           */
+    havoc_div = 1;           /* Cycle count divisor for havoc    */
 
 EXP_ST u64 total_crashes,             /* Total number of crashes          */
            unique_crashes,            /* Crashes with unique signatures   */
@@ -238,7 +245,53 @@ static s32 cpu_aff = -1;       	      /* Selected CPU core                */
 
 static FILE* plot_file;               /* Gnuplot output file              */
 
-struct queue_entry {
+typedef struct {
+  int32_t index;
+  UT_hash_handle hh;
+} MetaIndex;
+
+static MetaIndex *meta_indices;
+
+static void record_meta_index(int32_t index) {
+
+  MetaIndex *entry = NULL;
+
+  HASH_FIND(hh, meta_indices, &index, sizeof(index), entry);
+  if (entry) return;
+
+  entry = ck_alloc(sizeof(*entry));
+  entry->index = index;
+  HASH_ADD(hh, meta_indices, index, sizeof(entry->index), entry);
+
+}
+
+static void write_meta_indices(void) {
+
+  u8* fn = alloc_printf("%s/meta_indices", out_dir);
+  FILE* f = fopen(fn, "w");
+  ck_free(fn);
+
+  if (!f) return;
+
+  MetaIndex *cur, *tmp;
+  HASH_ITER(hh, meta_indices, cur, tmp) {
+    if (fprintf(f, "%d\n", cur->index) < 0) {
+      fclose(f);
+      return;
+    }
+  }
+
+  if (fclose(f)) return;
+
+  HASH_ITER(hh, meta_indices, cur, tmp) {
+    HASH_DEL(meta_indices, cur);
+    ck_free(cur);
+  }
+
+}
+
+    struct queue_entry
+{
 
   u8* fname;                          /* File name for the test case      */
   u32 len;                            /* Input length                     */
@@ -264,7 +317,6 @@ struct queue_entry {
 
   struct queue_entry *next,           /* Next element, if any             */
                      *next_100;       /* 100 elements ahead               */
-
 };
 
 static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
@@ -895,6 +947,160 @@ EXP_ST void read_bitmap(u8* fname) {
 
 }
 
+void unmodify_oracle(OracleType type, const Trace trace, u8 record_index)
+{
+  if (type == EDGE_COUNT)
+  {
+    if (record_index)
+    {
+      record_meta_index(trace.index);
+      // This id has retired (only recorded once cmp_value >= MAX_LOOP) -- its
+      // instrumentation is about to be stripped from the IR
+      // entirely, so there's no longer any threshold to track.
+      loop_threshold_remove(trace.index);
+    }
+    else
+    {
+      // This id is still active and just advanced to a new
+      // threshold that hasn't hit MAX_LOOP yet. Record it so it
+      // can be resumed if a recompile happens before it retires.
+      loop_threshold_set(trace.index, trace.cmp_value);
+
+      FILE *fp = fopen(oracle_path, "r+b");
+      if (fp == NULL)
+      {
+        perror("failed to open oracle file");
+        exit(EXIT_FAILURE);
+      }
+      uintptr_t offset = trace.addr - 0x400000;
+      if (fseek(fp, offset - 6, SEEK_SET) != 0)
+      {
+        perror("fseek failed edge count");
+        fclose(fp);
+        exit(EXIT_FAILURE);
+      }
+      if (fwrite(&trace.cmp_value, sizeof(trace.cmp_value), 1, fp) != 1)
+      {
+        perror("fwrite failed edge count");
+        fclose(fp);
+        exit(EXIT_FAILURE);
+      }
+      fclose(fp); // <-- ADD THIS: close on the success path too
+    }
+  }
+  else
+  {
+    record_meta_index(trace.index);
+  }
+}
+
+void overwrite_oracle(const Trace trace)
+{
+  int fd = open(oracle_path, O_RDWR);
+  if (fd < 0)
+  {
+    perror("open failed bin overwrite_oracle \n");
+    exit(EXIT_FAILURE);
+  }
+  unsigned char word9[9] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
+  unsigned char word5[5] = {0x90, 0x90, 0x90, 0x90, 0x90};
+  uintptr_t offset = trace.addr - 0x400000;
+  if (trace.is_edge_count)
+  {
+    ssize_t size = pwrite(fd, word9, 9, offset);
+    close(fd);
+    if (size != 9)
+    {
+      perror("failed to overwrite trap and meta_id with no-op \n");
+      exit(EXIT_FAILURE);
+    }
+  }
+  else
+  {
+    ssize_t size = pwrite(fd, word5, 5, offset);
+    close(fd);
+    if (size != 5)
+    {
+      perror("failed to overwrite trap and meta_id with no-op \n");
+      exit(EXIT_FAILURE);
+    }
+  }
+}
+
+u8 handle_new_coverage(u8 *virgin_map)
+{
+  uintptr_t addr = 0;
+  u8 found_something = 0;
+  int current_addr = 0;
+  while (current_addr < MAP_SIZE)
+  {
+    addr = trap_addr[current_addr].addr;
+
+    if (addr == 0 || addr <= 0x400000)
+    {
+      break;
+    }
+    int idx = current_addr++;
+    if (trap_addr[idx].index < 0 || trap_addr[idx].index >= MAP_SIZE)
+    {
+      fprintf(stderr, "index out of range: %d\n", trap_addr[idx].index);
+      exit(EXIT_FAILURE);
+    }
+    // unsigned char found = find_breakpoint(addr, target);
+    if (trap_addr[idx].is_edge_count)
+    {
+      if (trap_addr[idx].cmp_value <= LOOP_START_ADD_5)
+      {
+        // if compare value is <= 5 then the bucket is just the number - 1
+        if (virgin_map[trap_addr[idx].index] < (trap_addr[idx].cmp_value - 1))
+        {
+          // if the value in virgin blocks is less then we have a new coverage
+          virgin_map[trap_addr[idx].index] = trap_addr[idx].cmp_value - 1;
+          unmodify_oracle(EDGE_COUNT, trap_addr[idx], 0);
+          found_something = 1;
+        }
+      }
+      else
+      {
+        // once cmp_value is past LOOP_START_ADD_5, increment by 5 instead of 1
+        int32_t bucket_value = 4 + ((trap_addr[idx].cmp_value / 5) - 1);
+        if (virgin_bits[trap_addr[idx].index] < bucket_value)
+        {
+          // if the value in virgin blocks is less then we have a new coverage
+          virgin_bits[trap_addr[idx].index] = bucket_value;
+          if (trap_addr[idx].cmp_value >= MAX_LOOP)
+          {
+            unmodify_oracle(EDGE_COUNT, trap_addr[idx], 1);
+            overwrite_oracle(target, trap_addr[idx]);
+            DE_INSTRUMENTED = 1;
+          }
+          else
+          {
+            unmodify_oracle(EDGE_COUNT, trap_addr[idx], 0);
+          }
+          found_something = 1;
+        }
+      }
+    }
+    else
+    {
+      if (virgin_bits[trap_addr[idx].index] == 0)
+      {
+        virgin_bits[trap_addr[idx].index] = 1;
+        unmodify_oracle(EDGE, trap_addr[idx], 1);
+        overwrite_oracle(target, trap_addr[idx]);
+        found_something = 1;
+        DE_INSTRUMENTED = 1;
+      }
+      else
+      {
+        fprintf(stderr, "already covered block: blockid: %d, addr: %lu\n", trap_addr[idx].index, trap_addr[idx].addr);
+        exit(EXIT_FAILURE);
+      }
+    }
+  }
+  return found_something;
+}
 
 /* Check if the current execution path brings anything new to the table.
    Update virgin bits to reflect the finds. Returns 1 if the only change is
@@ -1230,6 +1436,7 @@ static inline void classify_counts(u32* mem) {
 static void remove_shm(void) {
 
   shmctl(shm_id, IPC_RMID, NULL);
+  shmctl(shm_trap_id, IPC_RMID, NULL);
 
 }
 
@@ -1371,11 +1578,12 @@ static void cull_queue(void) {
 EXP_ST void setup_shm(void) {
 
   u8* shm_str;
+  u8* shm_id_str;
 
-  if (!in_bitmap) memset(virgin_bits, 255, MAP_SIZE);
+  if (!in_bitmap) memset(virgin_bits, 0, MAP_SIZE);
 
-  memset(virgin_tmout, 255, MAP_SIZE);
-  memset(virgin_crash, 255, MAP_SIZE);
+  memset(virgin_tmout, 0, MAP_SIZE);
+  memset(virgin_crash, 0, MAP_SIZE);
 
   shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
 
@@ -1395,7 +1603,22 @@ EXP_ST void setup_shm(void) {
   ck_free(shm_str);
 
   trace_bits = shmat(shm_id, NULL, 0);
-  
+
+  shm_trap_id = shmget(IPC_PRIVATE, MAP_SIZE * sizeof(Trace), IPC_CREAT | 0600);
+  if (shm_trap_id == -1)
+  {
+    perror("shmget");
+    exit(EXIT_FAILURE);
+  }
+  shm_id_str = alloc_printf("%d", shm_trap_id);
+  setenv(SHM_ID, shm_id_str, 1);
+  trap_addr = (Trace *)shmat(shm_trap_id, NULL, 0);
+  if (trap_addr == (Trace *)-1)
+  {
+    perror("shmat");
+    exit(EXIT_FAILURE);
+  }
+
   if (trace_bits == (void *)-1) PFATAL("shmat() failed");
 
 }
@@ -2287,7 +2510,7 @@ EXP_ST void init_forkserver(char** argv) {
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
-static u8 run_target(char** argv, u32 timeout) {
+static u8 run_target(char** argv, u32 timeout, int for_oracle) {
 
   static struct itimerval it;
   static u32 prev_timed_out = 0;
@@ -2376,8 +2599,11 @@ static u8 run_target(char** argv, u32 timeout) {
       setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
                              "symbolize=0:"
                              "msan_track_origins=0", 0);
-
-      execv(target_path, argv);
+      if (for_oracle) {
+        execv(oracle_path, argv);
+      } else {
+        execv(target_path, argv);
+      }
 
       /* Use a distinctive bitmap value to tell the parent about execv()
          falling through. */
@@ -2460,9 +2686,9 @@ static u8 run_target(char** argv, u32 timeout) {
   tb4 = *(u32*)trace_bits;
 
 #ifdef WORD_SIZE_64
-  classify_counts((u64*)trace_bits);
+  // classify_counts((u64*)trace_bits);
 #else
-  classify_counts((u32*)trace_bits);
+  // classify_counts((u32*)trace_bits);
 #endif /* ^WORD_SIZE_64 */
 
   prev_timed_out = child_timed_out;
@@ -2619,7 +2845,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
     write_to_testcase(use_mem, q->len);
 
-    fault = run_target(argv, use_tmout);
+    fault = run_target(argv, use_tmout, 0);
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
@@ -2631,11 +2857,11 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
       goto abort_calibration;
     }
 
-    cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-
-    if (q->exec_cksum != cksum) {
-
-      hnb = has_new_bits(virgin_bits);
+    // cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    uintptr_t addr = trap_addr[0].addr;
+    if (addr > 0x400000)
+    {
+      hnb = handle_new_coverage();
       if (hnb > new_bits) new_bits = hnb;
 
       if (q->exec_cksum) {
@@ -2661,9 +2887,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
         memcpy(first_trace, trace_bits, MAP_SIZE);
 
       }
-
     }
-
   }
 
   stop_us = get_cur_time_us();
@@ -6871,10 +7095,11 @@ static void handle_timeout(int sig) {
    isn't a shell script - a common and painful mistake. We also check for
    a valid ELF header and for evidence of AFL instrumentation. */
 
-EXP_ST void check_binary(u8* fname) {
+EXP_ST void check_binary(u8* target_name, u8 *oracle_name) {
 
   u8* env_path = 0;
-  struct stat st;
+  struct stat st_target;
+  struct stat st_oracle;
 
   s32 fd;
   u8* f_data;
@@ -6882,14 +7107,19 @@ EXP_ST void check_binary(u8* fname) {
 
   ACTF("Validating target binary...");
 
-  if (strchr(fname, '/') || !(env_path = getenv("PATH"))) {
+  if (strchr(target_name, '/') || strchr(oracle_name, '/') || !(env_path = getenv("PATH"))) {
 
-    target_path = ck_strdup(fname);
-    if (stat(target_path, &st) || !S_ISREG(st.st_mode) ||
-        !(st.st_mode & 0111) || (f_len = st.st_size) < 4)
-      FATAL("Program '%s' not found or not executable", fname);
+    target_path = ck_strdup(target_name);
+    oracle_path = ck_strdup(oracle_name);
+    if (stat(target_path, &st_target) || !S_ISREG(st_target.st_mode) ||
+        !(st_target.st_mode & 0111) || (f_len = st_target.st_size) < 4)
+      FATAL("Program '%s' not found or not executable", target_name);
 
-  } else {
+  } else if (stat(oracle_path, &st_oracle) || !S_ISREG(st_oracle.st_mode) ||
+        !(st_oracle.st_mode & 0111) || (f_len = st_oracle.st_size) < 4)  {
+        FATAL("Program '%s' not found or not executable", oracle_name);
+        }
+  else {
 
     while (env_path) {
 
@@ -6905,22 +7135,26 @@ EXP_ST void check_binary(u8* fname) {
 
       env_path = delim;
 
-      if (cur_elem[0])
-        target_path = alloc_printf("%s/%s", cur_elem, fname);
-      else
-        target_path = ck_strdup(fname);
-
+      if (cur_elem[0]) {
+        target_path = alloc_printf("%s/%s", cur_elem, target_name);
+        oracle_path = alloc_printf("%s/%s", cur_elem, oracle_name);
+      } else {
+          target_path = ck_strdup(target_name);
+          oracle_path = ck_strdup(oracle_name);
+      }
       ck_free(cur_elem);
 
-      if (!stat(target_path, &st) && S_ISREG(st.st_mode) &&
-          (st.st_mode & 0111) && (f_len = st.st_size) >= 4) break;
-
+      if (!stat(target_path, &st_target) && S_ISREG(st_target.st_mode) &&
+          (st_target.st_mode & 0111) && (f_len = st_target.st_size) >= 4) break;
+      if (!stat(oracle_path, &st_oracle) && S_ISREG(st_oracle.st_mode) &&
+          (st_oracle.st_mode & 0111) && (f_len = st_oracle.st_size) >= 4) break;
       ck_free(target_path);
       target_path = 0;
 
     }
 
-    if (!target_path) FATAL("Program '%s' not found or not executable", fname);
+    if (!target_path) FATAL("Program '%s' not found or not executable", target_name);
+    if (!oracle_path) FATAL("Program '%s' not found or not executable", oracle_name);
 
   }
 
@@ -7268,7 +7502,6 @@ EXP_ST void setup_dirs_fds(void) {
                      "pending_total, pending_favs, map_size, unique_crashes, "
                      "unique_hangs, max_depth, execs_per_sec\n");
                      /* ignore errors */
-
 }
 
 
@@ -7669,80 +7902,6 @@ EXP_ST void setup_signal_handlers(void) {
 
 }
 
-
-/* Rewrite argv for QEMU. */
-
-static char** get_qemu_argv(u8* own_loc, char** argv, int argc) {
-
-  char** new_argv = ck_alloc(sizeof(char*) * (argc + 4));
-  u8 *tmp, *cp, *rsl, *own_copy;
-
-  /* Workaround for a QEMU stability glitch. */
-
-  setenv("QEMU_LOG", "nochain", 1);
-
-  memcpy(new_argv + 3, argv + 1, sizeof(char*) * argc);
-
-  new_argv[2] = target_path;
-  new_argv[1] = "--";
-
-  /* Now we need to actually find the QEMU binary to put in argv[0]. */
-
-  tmp = getenv("AFL_PATH");
-
-  if (tmp) {
-
-    cp = alloc_printf("%s/afl-qemu-trace", tmp);
-
-    if (access(cp, X_OK))
-      FATAL("Unable to find '%s'", tmp);
-
-    target_path = new_argv[0] = cp;
-    return new_argv;
-
-  }
-
-  own_copy = ck_strdup(own_loc);
-  rsl = strrchr(own_copy, '/');
-
-  if (rsl) {
-
-    *rsl = 0;
-
-    cp = alloc_printf("%s/afl-qemu-trace", own_copy);
-    ck_free(own_copy);
-
-    if (!access(cp, X_OK)) {
-
-      target_path = new_argv[0] = cp;
-      return new_argv;
-
-    }
-
-  } else ck_free(own_copy);
-
-  if (!access(BIN_PATH "/afl-qemu-trace", X_OK)) {
-
-    target_path = new_argv[0] = ck_strdup(BIN_PATH "/afl-qemu-trace");
-    return new_argv;
-
-  }
-
-  SAYF("\n" cLRD "[-] " cRST
-       "Oops, unable to find the 'afl-qemu-trace' binary. The binary must be built\n"
-       "    separately by following the instructions in qemu_mode/README.qemu. If you\n"
-       "    already have the binary installed, you may need to specify AFL_PATH in the\n"
-       "    environment.\n\n"
-
-       "    Of course, even without QEMU, afl-fuzz can still work with binaries that are\n"
-       "    instrumented at compile time with afl-gcc. It is also possible to use it as a\n"
-       "    traditional \"dumb\" fuzzer by specifying '-n' in the command line.\n");
-
-  FATAL("Failed to locate 'afl-qemu-trace'.");
-
-}
-
-
 /* Make a copy of the current command line. */
 
 static void save_cmdline(u32 argc, char** argv) {
@@ -8058,14 +8217,11 @@ int main(int argc, char** argv) {
 
   if (!out_file) setup_stdio_file();
 
-  check_binary(argv[optind]);
+  check_binary(argv[optind], argv[optind + 1]);
 
   start_time = get_cur_time();
 
-  if (qemu_mode)
-    use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
-  else
-    use_argv = argv + optind;
+  use_argv = argv + optind;
 
   perform_dry_run(use_argv);
 
@@ -8166,6 +8322,8 @@ int main(int argc, char** argv) {
   save_auto();
 
 stop_fuzzing:
+
+  write_meta_indices();
 
   SAYF(CURSOR_SHOW cLRD "\n\n+++ Testing aborted %s +++\n" cRST,
        stop_soon == 2 ? "programmatically" : "by user");

@@ -1,0 +1,23 @@
+xpdf/CMakeFiles/xpdf_objs.dir/UTF8.cc.o: \
+  /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/xpdf/UTF8.cc \
+  /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/aconf.h \
+  /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/xpdf/UTF8.h \
+  /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/goo/gtypes.h \
+  /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/goo/GString.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/limits.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/limits.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/sys/cdefs.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/sys/_symbol_aliasing.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/sys/_posix_availability.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/machine/limits.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/arm/limits.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/arm/_limits.h \
+  /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include/sys/syslimits.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/stdarg.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/__stdarg_header_macro.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/__stdarg___gnuc_va_list.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/__stdarg_va_list.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/__stdarg_va_arg.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/__stdarg___va_copy.h \
+  /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include/__stdarg_va_copy.h \
+  /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/xpdf/CharTypes.h

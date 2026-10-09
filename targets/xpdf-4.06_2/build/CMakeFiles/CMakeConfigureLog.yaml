@@ -1,0 +1,656 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      The system is: Darwin - 25.5.0 - arm64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: /opt/anaconda3/bin/wllvm 
+      Build flags: -I;/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include;-g
+      Id flags:  
+      
+      The output was:
+      0
+      ld: warning: can't parse dwarf compilation unit info in /var/folders/ng/7nz4_c3j66d7dntphl_yzvr80000gn/T/CMakeCCompilerId-e7455d.o
+      warning: no debug symbols in executable (-arch arm64)
+      ld: warning: can't parse dwarf compilation unit info in .CMakeCCompilerId.o
+      ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced ".CMakeCCompilerId.o"
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced ".CMakeCCompilerId.o.bc"
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced ".ldid..CMakeCCompilerId.o"
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is Clang, found in:
+        /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/3.31.10/CompilerIdC/.CMakeCCompilerId.o
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /opt/anaconda3/bin/wllvm++ 
+      Build flags: -I;/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include;-g
+      Id flags:  
+      
+      The output was:
+      0
+      ld: warning: can't parse dwarf compilation unit info in /var/folders/ng/7nz4_c3j66d7dntphl_yzvr80000gn/T/CMakeCXXCompilerId-0b3394.o
+      warning: no debug symbols in executable (-arch arm64)
+      ld: warning: can't parse dwarf compilation unit info in .CMakeCXXCompilerId.o
+      ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced ".CMakeCXXCompilerId.o"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced ".CMakeCXXCompilerId.o.bc"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced ".ldid..CMakeCXXCompilerId.o"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is Clang, found in:
+        /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/3.31.10/CompilerIdCXX/.CMakeCXXCompilerId.o
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:13 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_ea7be/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_ea7be.dir/build.make CMakeFiles/cmTC_ea7be.dir/build
+        Building C object CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g  -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk   -v -Wl,-v -MD -MT CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -MF CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o.d -o CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -c /opt/local/share/cmake-3.31/Modules/CMakeCCompilerABI.c
+        Homebrew clang version 22.1.1
+        Target: arm64-apple-darwin25.5.0
+        Thread model: posix
+        InstalledDir: /opt/homebrew/Cellar/llvm/22.1.1/bin
+        Configuration file: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang/arm64-apple-darwin25.cfg
+        System configuration file directory: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang
+        User configuration file directory: /Users/mac/.config/clang
+        clang: warning: -Wl,-v: 'linker' input unused [-Wunused-command-line-argument]
+         (in-process)
+         "/opt/homebrew/Cellar/llvm/22.1.1/bin/clang-22" -cc1 -triple arm64-apple-macosx26.0.0 -Wundef-prefix=TARGET_OS_ -Werror=undef-prefix -Wdeprecated-objc-isa-usage -Werror=deprecated-objc-isa-usage -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCCompilerABI.c -mrelocation-model pic -pic-level 2 -mframe-pointer=non-leaf-no-reserve -ffp-contract=on -fno-rounding-math -funwind-tables=1 -target-sdk-version=26.2 -fcompatibility-qualified-id-block-type-checking -fvisibility-inlines-hidden-static-local-var -fdefine-target-os-macros -fno-modulemap-allow-subdirectory-search -enable-tlsdesc -target-cpu apple-m1 -target-feature +v8.4a -target-feature +aes -target-feature +altnzcv -target-feature +ccdp -target-feature +ccpp -target-feature +complxnum -target-feature +crc -target-feature +dotprod -target-feature +flagm -target-feature +fp-armv8 -target-feature +fp16fml -target-feature +fptoint -target-feature +fullfp16 -target-feature +jsconv -target-feature +lse -target-feature +neon -target-feature +pauth -target-feature +perfmon -target-feature +predres -target-feature +ras -target-feature +rcpc -target-feature +rdm -target-feature +sb -target-feature +sha2 -target-feature +sha3 -target-feature +specrestrict -target-feature +ssbs -target-abi darwinpcs -debug-info-kind=standalone -dwarf-version=5 -debugger-tuning=lldb -fdebug-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K -target-linker-version 1230.1 -v -fcoverage-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K -resource-dir /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22 -dependency-file CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o.d -MT CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -sys-header-deps -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -internal-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include -internal-isystem /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include -internal-externc-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks -ferror-limit 19 -stack-protector 1 -fblocks -fencode-extended-block-signature -fregister-global-dtors-with-atexit -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fmax-type-align=16 -fdwarf2-cfi-asm -o CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -x c /opt/local/share/cmake-3.31/Modules/CMakeCCompilerABI.c
+        clang -cc1 version 22.1.1 based upon LLVM 22.1.1 default target arm64-apple-darwin25.5.0
+        ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include"
+        ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include
+         /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include
+         /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include
+         /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks (framework directory)
+         /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks (framework directory)
+        End of search list.
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_ea7be.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_ea7be.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ea7be.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_ea7be.a CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_ea7be.a
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include]
+          add: [/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include]
+          add: [/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+        end of search list found
+        collapse include dir [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include] ==> [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include]
+        collapse include dir [/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include] ==> [/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include]
+        collapse include dir [/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include] ==> [/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+        implicit include dirs: [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include;/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include;/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K']
+        ignore line: []
+        ignore line: [Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_ea7be/fast]
+        ignore line: [/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_ea7be.dir/build.make CMakeFiles/cmTC_ea7be.dir/build]
+        ignore line: [Building C object CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g  -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk   -v -Wl -v -MD -MT CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -MF CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o.d -o CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -c /opt/local/share/cmake-3.31/Modules/CMakeCCompilerABI.c]
+        ignore line: [Homebrew clang version 22.1.1]
+        ignore line: [Target: arm64-apple-darwin25.5.0]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /opt/homebrew/Cellar/llvm/22.1.1/bin]
+        ignore line: [Configuration file: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang/arm64-apple-darwin25.cfg]
+        ignore line: [System configuration file directory: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang]
+        ignore line: [User configuration file directory: /Users/mac/.config/clang]
+        ignore line: [clang: warning: -Wl -v: 'linker' input unused [-Wunused-command-line-argument]]
+        ignore line: [ (in-process)]
+        ignore line: [ "/opt/homebrew/Cellar/llvm/22.1.1/bin/clang-22" -cc1 -triple arm64-apple-macosx26.0.0 -Wundef-prefix=TARGET_OS_ -Werror=undef-prefix -Wdeprecated-objc-isa-usage -Werror=deprecated-objc-isa-usage -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCCompilerABI.c -mrelocation-model pic -pic-level 2 -mframe-pointer=non-leaf-no-reserve -ffp-contract=on -fno-rounding-math -funwind-tables=1 -target-sdk-version=26.2 -fcompatibility-qualified-id-block-type-checking -fvisibility-inlines-hidden-static-local-var -fdefine-target-os-macros -fno-modulemap-allow-subdirectory-search -enable-tlsdesc -target-cpu apple-m1 -target-feature +v8.4a -target-feature +aes -target-feature +altnzcv -target-feature +ccdp -target-feature +ccpp -target-feature +complxnum -target-feature +crc -target-feature +dotprod -target-feature +flagm -target-feature +fp-armv8 -target-feature +fp16fml -target-feature +fptoint -target-feature +fullfp16 -target-feature +jsconv -target-feature +lse -target-feature +neon -target-feature +pauth -target-feature +perfmon -target-feature +predres -target-feature +ras -target-feature +rcpc -target-feature +rdm -target-feature +sb -target-feature +sha2 -target-feature +sha3 -target-feature +specrestrict -target-feature +ssbs -target-abi darwinpcs -debug-info-kind=standalone -dwarf-version=5 -debugger-tuning=lldb -fdebug-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K -target-linker-version 1230.1 -v -fcoverage-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-Voc17K -resource-dir /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22 -dependency-file CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o.d -MT CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -sys-header-deps -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -internal-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include -internal-isystem /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include -internal-externc-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks -ferror-limit 19 -stack-protector 1 -fblocks -fencode-extended-block-signature -fregister-global-dtors-with-atexit -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fmax-type-align=16 -fdwarf2-cfi-asm -o CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o -x c /opt/local/share/cmake-3.31/Modules/CMakeCCompilerABI.c]
+        ignore line: [clang -cc1 version 22.1.1 based upon LLVM 22.1.1 default target arm64-apple-darwin25.5.0]
+        ignore line: [ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include"]
+        ignore line: [ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include]
+        ignore line: [ /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include]
+        ignore line: [ /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+        ignore line: [ /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks (framework directory)]
+        ignore line: [ /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks (framework directory)]
+        ignore line: [End of search list.]
+        link line: [ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o]
+          arg [ld:] ==> ignore
+          arg [warning:] ==> ignore
+          arg [cant parse dwarf compilation unit info in CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o] ==> ignore
+        ignore line: [ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE]
+        ignore line: [Linking C static library libcmTC_ea7be.a]
+        ignore line: [/opt/local/bin/cmake -P CMakeFiles/cmTC_ea7be.dir/cmake_clean_target.cmake]
+        ignore line: [/opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_ea7be.dir/link.txt --verbose=1]
+        ignore line: [/opt/anaconda3/bin/ar qc libcmTC_ea7be.a CMakeFiles/cmTC_ea7be.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_ea7be.a]
+        ignore line: []
+        ignore line: []
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:13 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_CXX_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_f17e0/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_f17e0.dir/build.make CMakeFiles/cmTC_f17e0.dir/build
+        Building CXX object CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o
+        /opt/anaconda3/bin/wllvm++   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g  -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk   -v -Wl,-v -MD -MT CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -c /opt/local/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp
+        Homebrew clang version 22.1.1
+        Target: arm64-apple-darwin25.5.0
+        Thread model: posix
+        InstalledDir: /opt/homebrew/Cellar/llvm/22.1.1/bin
+        Configuration file: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang/arm64-apple-darwin25.cfg
+        System configuration file directory: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang
+        User configuration file directory: /Users/mac/.config/clang
+        clang++: warning: -Wl,-v: 'linker' input unused [-Wunused-command-line-argument]
+         (in-process)
+         "/opt/homebrew/Cellar/llvm/22.1.1/bin/clang-22" -cc1 -triple arm64-apple-macosx26.0.0 -Wundef-prefix=TARGET_OS_ -Werror=undef-prefix -Wdeprecated-objc-isa-usage -Werror=deprecated-objc-isa-usage -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -mframe-pointer=non-leaf-no-reserve -ffp-contract=on -fno-rounding-math -funwind-tables=1 -target-sdk-version=26.2 -fcompatibility-qualified-id-block-type-checking -fvisibility-inlines-hidden-static-local-var -fdefine-target-os-macros -fno-modulemap-allow-subdirectory-search -enable-tlsdesc -target-cpu apple-m1 -target-feature +v8.4a -target-feature +aes -target-feature +altnzcv -target-feature +ccdp -target-feature +ccpp -target-feature +complxnum -target-feature +crc -target-feature +dotprod -target-feature +flagm -target-feature +fp-armv8 -target-feature +fp16fml -target-feature +fptoint -target-feature +fullfp16 -target-feature +jsconv -target-feature +lse -target-feature +neon -target-feature +pauth -target-feature +perfmon -target-feature +predres -target-feature +ras -target-feature +rcpc -target-feature +rdm -target-feature +sb -target-feature +sha2 -target-feature +sha3 -target-feature +specrestrict -target-feature +ssbs -target-abi darwinpcs -debug-info-kind=standalone -dwarf-version=5 -debugger-tuning=lldb -fdebug-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2 -target-linker-version 1230.1 -v -fcoverage-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2 -resource-dir /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22 -dependency-file CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -internal-isystem /opt/homebrew/Cellar/llvm/22.1.1/bin/../include/c++/v1 -internal-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include -internal-isystem /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include -internal-externc-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks -fdeprecated-macro -ferror-limit 19 -stack-protector 1 -fblocks -fencode-extended-block-signature -fregister-global-dtors-with-atexit -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fmax-type-align=16 -fdwarf2-cfi-asm -o CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -x c++ /opt/local/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp
+        clang -cc1 version 22.1.1 based upon LLVM 22.1.1 default target arm64-apple-darwin25.5.0
+        ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include"
+        ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include
+         /opt/homebrew/Cellar/llvm/22.1.1/bin/../include/c++/v1
+         /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include
+         /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include
+         /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks (framework directory)
+         /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks (framework directory)
+        End of search list.
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking CXX static library libcmTC_f17e0.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_f17e0.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f17e0.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_f17e0.a CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_f17e0.a
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include]
+          add: [/opt/homebrew/Cellar/llvm/22.1.1/bin/../include/c++/v1]
+          add: [/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include]
+          add: [/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+        end of search list found
+        collapse include dir [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include] ==> [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include]
+        collapse include dir [/opt/homebrew/Cellar/llvm/22.1.1/bin/../include/c++/v1] ==> [/opt/homebrew/Cellar/llvm/22.1.1/include/c++/v1]
+        collapse include dir [/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include] ==> [/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include]
+        collapse include dir [/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include] ==> [/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+        implicit include dirs: [/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include;/opt/homebrew/Cellar/llvm/22.1.1/include/c++/v1;/opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include;/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "/opt/local/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:13 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2']
+        ignore line: []
+        ignore line: [Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_f17e0/fast]
+        ignore line: [/Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_f17e0.dir/build.make CMakeFiles/cmTC_f17e0.dir/build]
+        ignore line: [Building CXX object CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/opt/anaconda3/bin/wllvm++   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g  -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk   -v -Wl -v -MD -MT CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -MF CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o.d -o CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -c /opt/local/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Homebrew clang version 22.1.1]
+        ignore line: [Target: arm64-apple-darwin25.5.0]
+        ignore line: [Thread model: posix]
+        ignore line: [InstalledDir: /opt/homebrew/Cellar/llvm/22.1.1/bin]
+        ignore line: [Configuration file: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang/arm64-apple-darwin25.cfg]
+        ignore line: [System configuration file directory: /opt/homebrew/Cellar/llvm/22.1.1/etc/clang]
+        ignore line: [User configuration file directory: /Users/mac/.config/clang]
+        ignore line: [clang++: warning: -Wl -v: 'linker' input unused [-Wunused-command-line-argument]]
+        ignore line: [ (in-process)]
+        ignore line: [ "/opt/homebrew/Cellar/llvm/22.1.1/bin/clang-22" -cc1 -triple arm64-apple-macosx26.0.0 -Wundef-prefix=TARGET_OS_ -Werror=undef-prefix -Wdeprecated-objc-isa-usage -Werror=deprecated-objc-isa-usage -emit-obj -disable-free -clear-ast-before-backend -disable-llvm-verifier -discard-value-names -main-file-name CMakeCXXCompilerABI.cpp -mrelocation-model pic -pic-level 2 -mframe-pointer=non-leaf-no-reserve -ffp-contract=on -fno-rounding-math -funwind-tables=1 -target-sdk-version=26.2 -fcompatibility-qualified-id-block-type-checking -fvisibility-inlines-hidden-static-local-var -fdefine-target-os-macros -fno-modulemap-allow-subdirectory-search -enable-tlsdesc -target-cpu apple-m1 -target-feature +v8.4a -target-feature +aes -target-feature +altnzcv -target-feature +ccdp -target-feature +ccpp -target-feature +complxnum -target-feature +crc -target-feature +dotprod -target-feature +flagm -target-feature +fp-armv8 -target-feature +fp16fml -target-feature +fptoint -target-feature +fullfp16 -target-feature +jsconv -target-feature +lse -target-feature +neon -target-feature +pauth -target-feature +perfmon -target-feature +predres -target-feature +ras -target-feature +rcpc -target-feature +rdm -target-feature +sb -target-feature +sha2 -target-feature +sha3 -target-feature +specrestrict -target-feature +ssbs -target-abi darwinpcs -debug-info-kind=standalone -dwarf-version=5 -debugger-tuning=lldb -fdebug-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2 -target-linker-version 1230.1 -v -fcoverage-compilation-dir=/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-5Hi3e2 -resource-dir /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22 -dependency-file CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o.d -MT CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -sys-header-deps -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -internal-isystem /opt/homebrew/Cellar/llvm/22.1.1/bin/../include/c++/v1 -internal-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include -internal-isystem /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include -internal-externc-isystem /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks -internal-iframework /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks -fdeprecated-macro -ferror-limit 19 -stack-protector 1 -fblocks -fencode-extended-block-signature -fregister-global-dtors-with-atexit -fgnuc-version=4.2.1 -fskip-odr-check-in-gmf -fcxx-exceptions -fexceptions -fmax-type-align=16 -fdwarf2-cfi-asm -o CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o -x c++ /opt/local/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [clang -cc1 version 22.1.1 based upon LLVM 22.1.1 default target arm64-apple-darwin25.5.0]
+        ignore line: [ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/local/include"]
+        ignore line: [ignoring nonexistent directory "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/Library/Frameworks"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include]
+        ignore line: [ /opt/homebrew/Cellar/llvm/22.1.1/bin/../include/c++/v1]
+        ignore line: [ /opt/homebrew/Cellar/llvm/22.1.1/lib/clang/22/include]
+        ignore line: [ /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/usr/include]
+        ignore line: [ /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks (framework directory)]
+        ignore line: [ /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/SubFrameworks (framework directory)]
+        ignore line: [End of search list.]
+        link line: [ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o]
+          arg [ld:] ==> ignore
+          arg [warning:] ==> ignore
+          arg [cant parse dwarf compilation unit info in CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+        ignore line: [ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE]
+        ignore line: [Linking CXX static library libcmTC_f17e0.a]
+        ignore line: [/opt/local/bin/cmake -P CMakeFiles/cmTC_f17e0.dir/cmake_clean_target.cmake]
+        ignore line: [/opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f17e0.dir/link.txt --verbose=1]
+        ignore line: [/opt/anaconda3/bin/ar qc libcmTC_f17e0.a CMakeFiles/cmTC_f17e0.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_f17e0.a]
+        ignore line: []
+        ignore line: []
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "cmake-config.txt:110 (check_function_exists)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Looking for mkstemp"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-hd54J1"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-hd54J1"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_MKSTEMP"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-hd54J1'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_81dc8/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_81dc8.dir/build.make CMakeFiles/cmTC_81dc8.dir/build
+        Building C object CMakeFiles/cmTC_81dc8.dir/CheckFunctionExists.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g -DCHECK_FUNCTION_EXISTS=mkstemp -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_81dc8.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_81dc8.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_81dc8.dir/CheckFunctionExists.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-hd54J1/CheckFunctionExists.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_81dc8.dir/CheckFunctionExists.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_81dc8.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_81dc8.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_81dc8.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_81dc8.a CMakeFiles/cmTC_81dc8.dir/CheckFunctionExists.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_81dc8.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "cmake-config.txt:111 (check_function_exists)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Looking for mkstemps"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-jkJRo3"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-jkJRo3"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_MKSTEMPS"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-jkJRo3'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_d7391/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_d7391.dir/build.make CMakeFiles/cmTC_d7391.dir/build
+        Building C object CMakeFiles/cmTC_d7391.dir/CheckFunctionExists.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g -DCHECK_FUNCTION_EXISTS=mkstemps -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_d7391.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_d7391.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_d7391.dir/CheckFunctionExists.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-jkJRo3/CheckFunctionExists.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_d7391.dir/CheckFunctionExists.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_d7391.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_d7391.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d7391.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_d7391.a CMakeFiles/cmTC_d7391.dir/CheckFunctionExists.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_d7391.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "cmake-config.txt:112 (check_function_exists)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Looking for popen"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-CV3HlB"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-CV3HlB"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_POPEN"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-CV3HlB'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_d901c/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_d901c.dir/build.make CMakeFiles/cmTC_d901c.dir/build
+        Building C object CMakeFiles/cmTC_d901c.dir/CheckFunctionExists.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g -DCHECK_FUNCTION_EXISTS=popen -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_d901c.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_d901c.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_d901c.dir/CheckFunctionExists.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-CV3HlB/CheckFunctionExists.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_d901c.dir/CheckFunctionExists.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_d901c.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_d901c.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_d901c.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_d901c.a CMakeFiles/cmTC_d901c.dir/CheckFunctionExists.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_d901c.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/opt/local/share/cmake-3.31/Modules/CheckCXXSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "cmake-config.txt:113 (check_cxx_source_compiles)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Performing Test HAVE_STD_SORT"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-xGAV4R"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-xGAV4R"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_CXX_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_STD_SORT"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-xGAV4R'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_9072f/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_9072f.dir/build.make CMakeFiles/cmTC_9072f.dir/build
+        Building CXX object CMakeFiles/cmTC_9072f.dir/src.cxx.o
+        /opt/anaconda3/bin/wllvm++ -DHAVE_STD_SORT  -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g  -std=gnu++11 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_9072f.dir/src.cxx.o -MF CMakeFiles/cmTC_9072f.dir/src.cxx.o.d -o CMakeFiles/cmTC_9072f.dir/src.cxx.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-xGAV4R/src.cxx
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_9072f.dir/src.cxx.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking CXX static library libcmTC_9072f.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_9072f.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9072f.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_9072f.a CMakeFiles/cmTC_9072f.dir/src.cxx.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_9072f.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "cmake-config.txt:121 (check_function_exists)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Looking for fseeko"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-qADPj4"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-qADPj4"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_FSEEKO"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-qADPj4'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_20f34/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_20f34.dir/build.make CMakeFiles/cmTC_20f34.dir/build
+        Building C object CMakeFiles/cmTC_20f34.dir/CheckFunctionExists.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g -DCHECK_FUNCTION_EXISTS=fseeko -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_20f34.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_20f34.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_20f34.dir/CheckFunctionExists.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-qADPj4/CheckFunctionExists.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_20f34.dir/CheckFunctionExists.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_20f34.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_20f34.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_20f34.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_20f34.a CMakeFiles/cmTC_20f34.dir/CheckFunctionExists.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_20f34.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "cmake-config.txt:122 (check_function_exists)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Looking for fseek64"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DSTev9"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DSTev9"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_FSEEK64"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DSTev9'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_62d87/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_62d87.dir/build.make CMakeFiles/cmTC_62d87.dir/build
+        Building C object CMakeFiles/cmTC_62d87.dir/CheckFunctionExists.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g -DCHECK_FUNCTION_EXISTS=fseek64 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_62d87.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_62d87.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_62d87.dir/CheckFunctionExists.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DSTev9/CheckFunctionExists.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_62d87.dir/CheckFunctionExists.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_62d87.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_62d87.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_62d87.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_62d87.a CMakeFiles/cmTC_62d87.dir/CheckFunctionExists.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_62d87.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "cmake-config.txt:123 (check_function_exists)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Looking for _fseeki64"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-AVLL60"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-AVLL60"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "HAVE_FSEEKI64"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-AVLL60'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_f5e1b/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_f5e1b.dir/build.make CMakeFiles/cmTC_f5e1b.dir/build
+        Building C object CMakeFiles/cmTC_f5e1b.dir/CheckFunctionExists.c.o
+        /opt/anaconda3/bin/wllvm   -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g -DCHECK_FUNCTION_EXISTS=_fseeki64 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_f5e1b.dir/CheckFunctionExists.c.o -MF CMakeFiles/cmTC_f5e1b.dir/CheckFunctionExists.c.o.d -o CMakeFiles/cmTC_f5e1b.dir/CheckFunctionExists.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-AVLL60/CheckFunctionExists.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_f5e1b.dir/CheckFunctionExists.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_f5e1b.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_f5e1b.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f5e1b.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_f5e1b.a CMakeFiles/cmTC_f5e1b.dir/CheckFunctionExists.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_f5e1b.a
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/opt/local/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/opt/local/share/cmake-3.31/Modules/CheckCSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "/opt/local/share/cmake-3.31/Modules/FindThreads.cmake:97 (CHECK_C_SOURCE_COMPILES)"
+      - "/opt/local/share/cmake-3.31/Modules/FindThreads.cmake:163 (_threads_check_libc)"
+      - "cmake-config.txt:307 (find_package)"
+      - "CMakeLists.txt:15 (include)"
+    checks:
+      - "Performing Test CMAKE_HAVE_LIBC_PTHREAD"
+    directories:
+      source: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DPGtfp"
+      binary: "/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DPGtfp"
+    cmakeVariables:
+      CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS: "/opt/homebrew/opt/llvm/bin/clang-scan-deps"
+      CMAKE_C_FLAGS: "-I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g"
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_OSX_ARCHITECTURES: ""
+      CMAKE_OSX_DEPLOYMENT_TARGET: ""
+      CMAKE_OSX_SYSROOT: "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk"
+    buildResult:
+      variable: "CMAKE_HAVE_LIBC_PTHREAD"
+      cached: true
+      stdout: |
+        Change Dir: '/Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DPGtfp'
+        
+        Run Build Command(s): /opt/local/bin/cmake -E env VERBOSE=1 /usr/bin/make -f Makefile cmTC_e3b5d/fast
+        /Applications/Xcode.app/Contents/Developer/usr/bin/make  -f CMakeFiles/cmTC_e3b5d.dir/build.make CMakeFiles/cmTC_e3b5d.dir/build
+        Building C object CMakeFiles/cmTC_e3b5d.dir/src.c.o
+        /opt/anaconda3/bin/wllvm -DCMAKE_HAVE_LIBC_PTHREAD  -I /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/include -g  -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk -MD -MT CMakeFiles/cmTC_e3b5d.dir/src.c.o -MF CMakeFiles/cmTC_e3b5d.dir/src.c.o.d -o CMakeFiles/cmTC_e3b5d.dir/src.c.o -c /Users/mac/Documents/forte_research/untracer_all/untracer_llvm_fork/xpdf-4.06_2/build/CMakeFiles/CMakeScratch/TryCompile-DPGtfp/src.c
+        ld: warning: can't parse dwarf compilation unit info in CMakeFiles/cmTC_e3b5d.dir/src.c.o
+        ldid.cpp(865): _assert(): Swap(mach_header_->filetype) == MH_EXECUTE || Swap(mach_header_->filetype) == MH_DYLIB || Swap(mach_header_->filetype) == MH_DYLINKER || Swap(mach_header_->filetype) == MH_BUNDLE
+        Linking C static library libcmTC_e3b5d.a
+        /opt/local/bin/cmake -P CMakeFiles/cmTC_e3b5d.dir/cmake_clean_target.cmake
+        /opt/local/bin/cmake -E cmake_link_script CMakeFiles/cmTC_e3b5d.dir/link.txt --verbose=1
+        /opt/anaconda3/bin/ar qc libcmTC_e3b5d.a CMakeFiles/cmTC_e3b5d.dir/src.c.o
+        /opt/homebrew/opt/llvm/bin/llvm-ranlib libcmTC_e3b5d.a
+        
+      exitCode: 0
+...
