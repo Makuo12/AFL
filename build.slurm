@@ -49,49 +49,42 @@ make -C $wrap/build -j$(nproc)
 
 
 echo "Building utils"
-$BIN_PATH/clang++ $INCLUDE  $wrap/tools/utils.cc -o $wrap/output/utils
 
 echo "Building xpdf with custom coverage tracer..."
-cd $wrap/targets/xpdf-4.06_2
-rm -rf build && mkdir build
-cd build
+SRC="$wrap/targets/xpdf-4.06_2"
+BUILD="$SRC/build"
 
-if [[ "$(uname -s)" == "Darwin" ]]; then
-    COVERAGE_FLAGS="-I $wrap/include -fno-pie"
-    cmake -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=wllvm \
-            -DCMAKE_CXX_COMPILER=wllvm++ \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_C_FLAGS="$COVERAGE_FLAGS" \
-            -DCMAKE_CXX_FLAGS="$COVERAGE_FLAGS" \
-            ../
-elif [[ "$(uname -s)" == "Linux" ]]; then
-    COVERAGE_FLAGS="-I $wrap/include -fno-pie"
-    cmake -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=wllvm \
-            -DCMAKE_CXX_COMPILER=wllvm++ \
-            -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-            -DCMAKE_C_FLAGS="$COVERAGE_FLAGS" \
-            -DCMAKE_CXX_FLAGS="$COVERAGE_FLAGS" \
-            -DCMAKE_EXE_LINKER_FLAGS="-no-pie" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-no-pie" \
-            ../
-else
-    echo "Unknown OS: $(uname -s)"
-    exit 1
-fi
+rm -rf "$BUILD"
 
-make -j$(nproc)
+COVERAGE_FLAGS="-I $wrap/include -fno-pie"
+EXTRA_ARGS=()
+
+case "$(uname -s)" in
+  Darwin) ;;
+  Linux)  EXTRA_ARGS=(-DCMAKE_EXE_LINKER_FLAGS="-no-pie"
+                      -DCMAKE_SHARED_LINKER_FLAGS="-no-pie") ;;
+  *) echo "Unknown OS: $(uname -s)"; exit 1 ;;
+esac
+
+cmake -S "$SRC" -B "$BUILD" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=wllvm \
+  -DCMAKE_CXX_COMPILER=wllvm++ \
+  -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+  -DCMAKE_C_FLAGS="$COVERAGE_FLAGS" \
+  -DCMAKE_CXX_FLAGS="$COVERAGE_FLAGS" \
+  "${EXTRA_ARGS[@]}"
+
+cmake --build "$BUILD" -j"$(nproc)"
 
 echo "Extract whole-program bitcode from the final binary"
-extract-bc ./xpdf/pdftotext -o whole_program.bc
-cd ../..
+extract-bc $BUILD/xpdf/pdftotext -o $wrap/output/whole_program.bc
 
 echo "Currently at $(pwd)"
 $BIN_PATH/opt \
     -load-pass-plugin=$wrap/build/Untracer.so \
     -passes="rename" \
-    $wrap/xpdf-4.06_2/build/whole_program.bc -o $wrap/output/out.bc
+    $wrap/output/whole_program.bc -o $wrap/output/out.bc
 
 echo "Disassembling bitcode to LLVM IR"
 llvm-dis $wrap/output/out.bc -o $wrap/output/out.ll
