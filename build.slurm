@@ -97,12 +97,12 @@ $BIN_PATH/clang++ $wrap/src/EdgeCount.cc $wrap/src/EdgeHandler.cc \
     $wrap/src/PCTable.cc $wrap/src/Instrumentation.cc   \
     -I include -o $wrap/output/edge \
     $(llvm-config --cxxflags --ldflags --libs core irreader analysis) \
-    $(llvm-config --system-libs) -03
+    $(llvm-config --system-libs) $PERF_FLAGS
 
 $BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc $wrap/src/DeEdgeHandler.cc \
     -I include -o $wrap/output/remove_edge \
     $(llvm-config --cxxflags --ldflags --libs core irreader analysis) \
-    $(llvm-config --system-libs)
+    $(llvm-config --system-libs) $PERF_FLAGS
 
 $wrap/output/edge "$wrap/output/out.ll" "$wrap/output/main.transformed.ll"
 
