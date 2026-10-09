@@ -265,30 +265,6 @@ static void record_meta_index(int32_t index) {
 
 }
 
-static void write_meta_indices(void) {
-
-  u8* fn = alloc_printf("%s/meta_indices", out_dir);
-  FILE* f = fopen(fn, "w");
-  ck_free(fn);
-
-  if (!f) return;
-
-  MetaIndex *cur, *tmp;
-  HASH_ITER(hh, meta_indices, cur, tmp) {
-    if (fprintf(f, "%d\n", cur->index) < 0) {
-      fclose(f);
-      return;
-    }
-  }
-
-  if (fclose(f)) return;
-
-  HASH_ITER(hh, meta_indices, cur, tmp) {
-    HASH_DEL(meta_indices, cur);
-    ck_free(cur);
-  }
-
-}
 
     struct queue_entry
 {
@@ -907,6 +883,40 @@ EXP_ST void destroy_queue(void) {
 
 }
 
+/* Zero only the used entries, not the whole 1.5 MB region. */
+static void clear_traps(void)
+{
+  for (u32 i = 0; i < MAP_SIZE; i++)
+  {
+    if (trap_addr[i].addr <= 0x400000)
+      break;
+    memset(&trap_addr[i], 0, sizeof(Trace));
+  }
+}
+
+static inline u8 bucket_of(int32_t cmp)
+{
+  int32_t b = (cmp <= LOOP_START_ADD_5) ? cmp : 4 + cmp / 5;
+  return b > 255 ? 255 : (b < 0 ? 0 : b);
+}
+
+/* Deterministic projection of the hits onto trace_bits (max per index,
+   so firing order doesn't matter). */
+static void traps_to_trace(void)
+
+{
+  for (u32 i = 0; i < MAP_SIZE; i++)
+  {
+    Trace *t = &trap_addr[i];
+    if (t->addr <= 0x400000)
+      break;
+    if (t->index < 0 || t->index >= MAP_SIZE)
+      continue;
+    u8 b = t->is_edge_count ? bucket_of(t->cmp_value) : 1;
+    if (b > trace_bits[t->index])
+      trace_bits[t->index] = b;
+  }
+}
 
 /* Write bitmap to file. The bitmap is useful mostly for the secret
    -B option, to focus a separate fuzzing session on a particular
@@ -1027,79 +1037,88 @@ void overwrite_oracle(const Trace trace)
   }
 }
 
-u8 handle_new_coverage(u8 *virgin_map)
-{
-  uintptr_t addr = 0;
-  u8 found_something = 0;
-  int current_addr = 0;
-  while (current_addr < MAP_SIZE)
-  {
-    addr = trap_addr[current_addr].addr;
+u8 virgin_cnt[MAP_SIZE]; /* highest hit-count bucket seen per index; 0 = none */
+                         /* memset(virgin_cnt, 0, MAP_SIZE) in setup_shm()     */
 
-    if (addr == 0 || addr <= 0x400000)
+
+/* Call once per run, right after run_target(). Returns 0 = nothing new,
+   1 = new hit-count bucket only, 2 = new edge. Consumes trap_addr. */
+static u8 handle_new_coverage(void)
+{
+
+  u8 ret = 0;
+  u32 n;
+
+  /* Pass 1: decide and patch the oracle. Compare against the maps as they
+     were on entry, so processing order doesn't matter. */
+  for (n = 0; n < MAP_SIZE; n++)
+  {
+
+    Trace *t = &trap_addr[n];
+
+    if (t->addr <= 0x400000)
+      break; /* end of list */
+
+    if (t->index < 0 || t->index >= MAP_SIZE)
+      FATAL("index out of range: %d", t->index);
+
+    if (t->is_edge_count)
     {
-      break;
-    }
-    int idx = current_addr++;
-    if (trap_addr[idx].index < 0 || trap_addr[idx].index >= MAP_SIZE)
-    {
-      fprintf(stderr, "index out of range: %d\n", trap_addr[idx].index);
-      exit(EXIT_FAILURE);
-    }
-    // unsigned char found = find_breakpoint(addr, target);
-    if (trap_addr[idx].is_edge_count)
-    {
-      if (trap_addr[idx].cmp_value <= LOOP_START_ADD_5)
+
+      if (bucket_of(t->cmp_value) <= virgin_cnt[t->index])
+        continue;
+
+      if (t->cmp_value >= MAX_LOOP)
       {
-        // if compare value is <= 5 then the bucket is just the number - 1
-        if (virgin_map[trap_addr[idx].index] < (trap_addr[idx].cmp_value - 1))
-        {
-          // if the value in virgin blocks is less then we have a new coverage
-          virgin_map[trap_addr[idx].index] = trap_addr[idx].cmp_value - 1;
-          unmodify_oracle(EDGE_COUNT, trap_addr[idx], 0);
-          found_something = 1;
-        }
-      }
-      else
-      {
-        // once cmp_value is past LOOP_START_ADD_5, increment by 5 instead of 1
-        int32_t bucket_value = 4 + ((trap_addr[idx].cmp_value / 5) - 1);
-        if (virgin_bits[trap_addr[idx].index] < bucket_value)
-        {
-          // if the value in virgin blocks is less then we have a new coverage
-          virgin_bits[trap_addr[idx].index] = bucket_value;
-          if (trap_addr[idx].cmp_value >= MAX_LOOP)
-          {
-            unmodify_oracle(EDGE_COUNT, trap_addr[idx], 1);
-            overwrite_oracle(target, trap_addr[idx]);
-            DE_INSTRUMENTED = 1;
-          }
-          else
-          {
-            unmodify_oracle(EDGE_COUNT, trap_addr[idx], 0);
-          }
-          found_something = 1;
-        }
-      }
-    }
-    else
-    {
-      if (virgin_bits[trap_addr[idx].index] == 0)
-      {
-        virgin_bits[trap_addr[idx].index] = 1;
-        unmodify_oracle(EDGE, trap_addr[idx], 1);
-        overwrite_oracle(target, trap_addr[idx]);
-        found_something = 1;
+        unmodify_oracle(EDGE_COUNT, *t, 1);
+        overwrite_oracle(*t);
         DE_INSTRUMENTED = 1;
       }
       else
       {
-        fprintf(stderr, "already covered block: blockid: %d, addr: %lu\n", trap_addr[idx].index, trap_addr[idx].addr);
-        exit(EXIT_FAILURE);
+        unmodify_oracle(EDGE_COUNT, *t, 0);
       }
+
+      if (!ret)
+        ret = 1;
+    }
+    else
+    {
+
+      if (virgin_bits[t->index])
+        continue; /* known edge: normal under target_path */
+
+      unmodify_oracle(EDGE, *t, 1);
+      overwrite_oracle(*t);
+      DE_INSTRUMENTED = 1;
+      ret = 2;
     }
   }
-  return found_something;
+
+  /* Pass 2: commit to the maps. */
+  for (u32 i = 0; i < n; i++)
+  {
+
+    Trace *t = &trap_addr[i];
+
+    if (t->is_edge_count)
+    {
+      u8 b = bucket_of(t->cmp_value);
+      if (b > virgin_cnt[t->index])
+        virgin_cnt[t->index] = b;
+    }
+    else
+    {
+      virgin_bits[t->index] = 1;
+    }
+  }
+
+  // clear_traps();
+
+  if (ret)
+    bitmap_changed = 1;
+
+  return ret;
 }
 
 /* Check if the current execution path brings anything new to the table.
@@ -1580,10 +1599,14 @@ EXP_ST void setup_shm(void) {
   u8* shm_str;
   u8* shm_id_str;
 
-  if (!in_bitmap) memset(virgin_bits, 0, MAP_SIZE);
+  if (!in_bitmap)
+  {
+    memset(virgin_bits, 0, MAP_SIZE);
+    memset(virgin_cnt, 0, MAP_SIZE);
+  }
 
-  memset(virgin_tmout, 0, MAP_SIZE);
-  memset(virgin_crash, 0, MAP_SIZE);
+  memset(virgin_tmout, 255, MAP_SIZE);
+  memset(virgin_crash, 255, MAP_SIZE);
 
   shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
 
@@ -2507,6 +2530,7 @@ EXP_ST void init_forkserver(char** argv) {
 }
 
 
+
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
@@ -2525,6 +2549,7 @@ static u8 run_target(char** argv, u32 timeout, int for_oracle) {
      must prevent any earlier operations from venturing into that
      territory. */
 
+  clear_traps(); /* before the run, next to memset(trace_bits) */
   memset(trace_bits, 0, MAP_SIZE);
   MEM_BARRIER();
 
@@ -2683,7 +2708,8 @@ static u8 run_target(char** argv, u32 timeout, int for_oracle) {
 
   MEM_BARRIER();
 
-  tb4 = *(u32*)trace_bits;
+  tb4 = *(u32 *)trace_bits; /* keep this read first (EXEC_FAIL_SIG) */
+  traps_to_trace();
 
 #ifdef WORD_SIZE_64
   // classify_counts((u64*)trace_bits);
@@ -2787,6 +2813,24 @@ static void write_with_gap(void* mem, u32 len, u32 skip_at, u32 skip_len) {
 
 }
 
+static void write_meta_indices(void)
+{
+
+  u8 *fn = alloc_printf("%s/meta_indices", out_dir);
+  FILE *f = fopen(fn, "w");
+  ck_free(fn);
+
+  if (!f)
+    return; /* non-critical, don't PFATAL */
+
+  MetaIndex *cur, *tmp;
+  HASH_ITER(hh, meta_indices, cur, tmp)
+  {
+    fprintf(f, "%d\n", cur->index);
+  }
+
+  fclose(f);
+}
 
 static void show_stats(void);
 
@@ -2794,23 +2838,21 @@ static void show_stats(void);
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
 
-static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
-                         u32 handicap, u8 from_queue) {
+static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
+                         u32 handicap, u8 from_queue)
+{
 
   static u8 first_trace[MAP_SIZE];
+  
 
-  u8  fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
-      first_run = (q->exec_cksum == 0);
+  u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
+     first_run = (q->exec_cksum == 0);
 
   u64 start_us, stop_us;
 
   s32 old_sc = stage_cur, old_sm = stage_max;
   u32 use_tmout = exec_tmout;
-  u8* old_sn = stage_name;
-
-  /* Be a bit more generous about timeouts when resuming sessions, or when
-     trying to calibrate already-added finds. This helps avoid trouble due
-     to intermittent latency. */
+  u8 *old_sn = stage_name;
 
   if (!from_queue || resuming_fuzz)
     use_tmout = MAX(exec_tmout + CAL_TMOUT_ADD,
@@ -2819,131 +2861,121 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
   q->cal_failed++;
 
   stage_name = "calibration";
-  stage_max  = fast_cal ? 3 : CAL_CYCLES;
-
-  /* Make sure the forkserver is up before we do anything, and let's not
-     count its spin-up time toward binary calibration. */
+  stage_max = fast_cal ? 3 : CAL_CYCLES;
 
   if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
     init_forkserver(argv);
 
-  if (q->exec_cksum) {
-
-    memcpy(first_trace, trace_bits, MAP_SIZE);
-    hnb = has_new_bits(virgin_bits);
-    if (hnb > new_bits) new_bits = hnb;
-
-  }
+  /* The old "if (q->exec_cksum) { memcpy(first_trace...); has_new_bits }"
+     block is gone: trace_bits at this point may be a leftover oracle trace.
+     The baseline now always comes from our own first run below. */
 
   start_us = get_cur_time_us();
 
-  for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
+  for (stage_cur = 0; stage_cur < stage_max; stage_cur++)
+  {
 
     u32 cksum;
 
-    if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
+    if (!first_run && !(stage_cur % stats_update_freq))
+      show_stats();
 
     write_to_testcase(use_mem, q->len);
 
-    fault = run_target(argv, use_tmout, 0);
+    fault = run_target(argv, use_tmout, 0); /* target_path */
 
-    /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
-       we want to bail out quickly. */
+    if (stop_soon || fault != crash_mode)
+      goto abort_calibration;
 
-    if (stop_soon || fault != crash_mode) goto abort_calibration;
-
-    if (!dumb_mode && !stage_cur && !count_bytes(trace_bits)) {
+    if (!dumb_mode && !stage_cur && !count_bytes(trace_bits))
+    {
       fault = FAULT_NOINST;
       goto abort_calibration;
     }
 
-    // cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-    uintptr_t addr = trap_addr[0].addr;
-    if (addr > 0x400000)
+
+    cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+
+    if (!stage_cur)
     {
+
+      /* Baseline from the target run, overwriting any oracle-derived value. */
+      q->exec_cksum = cksum;
+      memcpy(first_trace, trace_bits, MAP_SIZE);
+
+      /* Patch the oracle for anything not yet known (matters for seeds;
+         for oracle-found inputs this normally returns 0). */
       hnb = handle_new_coverage();
-      if (hnb > new_bits) new_bits = hnb;
+      if (hnb > new_bits)
+        new_bits = hnb;
+    }
+    else if (cksum != q->exec_cksum)
+    {
 
-      if (q->exec_cksum) {
+      hnb = handle_new_coverage();
+      if (hnb > new_bits)
+        new_bits = hnb;
 
-        u32 i;
-
-        for (i = 0; i < MAP_SIZE; i++) {
-
-          if (!var_bytes[i] && first_trace[i] != trace_bits[i]) {
-
-            var_bytes[i] = 1;
-            stage_max    = CAL_CYCLES_LONG;
-
-          }
-
+      for (u32 i = 0; i < MAP_SIZE; i++)
+      {
+        if (!var_bytes[i] && first_trace[i] != trace_bits[i])
+        {
+          var_bytes[i] = 1;
+          stage_max = CAL_CYCLES_LONG;
         }
-
-        var_detected = 1;
-
-      } else {
-
-        q->exec_cksum = cksum;
-        memcpy(first_trace, trace_bits, MAP_SIZE);
-
       }
+
+      var_detected = 1;
     }
   }
 
   stop_us = get_cur_time_us();
 
-  total_cal_us     += stop_us - start_us;
+  total_cal_us += stop_us - start_us;
   total_cal_cycles += stage_max;
 
-  /* OK, let's collect some stats about the performance of this test case.
-     This is used for fuzzing air time calculations in calculate_score(). */
-
-  q->exec_us     = (stop_us - start_us) / stage_max;
+  q->exec_us = (stop_us - start_us) / stage_max;
   q->bitmap_size = count_bytes(trace_bits);
-  q->handicap    = handicap;
-  q->cal_failed  = 0;
+  q->handicap = handicap;
+  q->cal_failed = 0;
 
   total_bitmap_size += q->bitmap_size;
   total_bitmap_entries++;
 
   update_bitmap_score(q);
 
-  /* If this case didn't result in new output from the instrumentation, tell
-     parent. This is a non-critical problem, but something to warn the user
-     about. */
-
-  if (!dumb_mode && first_run && !fault && !new_bits) fault = FAULT_NOBITS;
+  /* Only seeds should be flagged "useless"; oracle-found inputs and retries
+     have already consumed their new bits, so new_bits is legitimately 0. */
+  if (!dumb_mode && first_run && from_queue && !fault && !new_bits)
+    fault = FAULT_NOBITS;
 
 abort_calibration:
 
-  if (new_bits == 2 && !q->has_new_cov) {
+  if (new_bits == 2 && !q->has_new_cov)
+  {
     q->has_new_cov = 1;
     queued_with_cov++;
   }
 
-  /* Mark variable paths. */
-
-  if (var_detected) {
-
+  if (var_detected)
+  {
     var_byte_count = count_bytes(var_bytes);
-
-    if (!q->var_behavior) {
+    if (!q->var_behavior)
+    {
       mark_as_variable(q);
       queued_variable++;
     }
-
   }
 
   stage_name = old_sn;
-  stage_cur  = old_sc;
-  stage_max  = old_sm;
+  stage_cur = old_sc;
+  stage_max = old_sm;
 
-  if (!first_run) show_stats();
+  if (!first_run)
+    show_stats();
 
   return fault;
-
 }
-
 
 /* Examine map coverage. Called once, for first test case. */
 
@@ -3384,45 +3416,44 @@ static void write_crash_readme(void) {
    save or queue the input test case for further analysis if so. Returns 1 if
    entry is saved, 0 otherwise. */
 
-static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
+static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
+{
 
-  u8  *fn = "";
-  u8  hnb;
+  u8 *fn = "";
+  u8 hnb;
   s32 fd;
-  u8  keeping = 0, res;
+  u8 keeping = 0, res;
 
-  if (fault == crash_mode) {
+  if (fault == crash_mode)
+  {
 
-    /* Keep only if there are new bits in the map, add to queue for
-       future fuzzing, etc. */
+    /* Normal/success path - this just ran on oracle_path. Oracle-driven
+       novelty check: did we hit anything not yet patched out? */
 
-    if (!(hnb = has_new_bits(virgin_bits))) {
-      if (crash_mode) total_crashes++;
+    if (!(hnb = handle_new_coverage()))
+    {
+      if (crash_mode)
+        total_crashes++;
       return 0;
-    }    
+    }
 
 #ifndef SIMPLE_FILES
-
     fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,
                       describe_op(hnb));
-
 #else
-
     fn = alloc_printf("%s/queue/id_%06u", out_dir, queued_paths);
-
-#endif /* ^!SIMPLE_FILES */
+#endif
 
     add_to_queue(fn, len, 0);
 
-    if (hnb == 2) {
+    if (hnb == 2)
+    {
       queue_top->has_new_cov = 1;
       queued_with_cov++;
     }
 
-    queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-
-    /* Try to calibrate inline; this also calls update_bitmap_score() when
-       successful. */
+    /* exec_cksum left at 0 on purpose - calibrate_case sets it from a
+       target_path run, which is the only trace we want it derived from. */
 
     res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
 
@@ -3430,144 +3461,157 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
       FATAL("Unable to execute target application");
 
     fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd < 0) PFATAL("Unable to create '%s'", fn);
+    if (fd < 0)
+      PFATAL("Unable to create '%s'", fn);
     ck_write(fd, mem, len, fn);
     close(fd);
 
     keeping = 1;
-
   }
 
-  switch (fault) {
+  switch (fault)
+  {
 
-    case FAULT_TMOUT:
+  case FAULT_TMOUT:
+  {
 
-      /* Timeouts are not very interesting, but we're still obliged to keep
-         a handful of samples. We use the presence of new bits in the
-         hang-specific bitmap as a signal of uniqueness. In "dumb" mode, we
-         just keep everything. */
+    total_tmouts++;
 
-      total_tmouts++;
+    if (unique_hangs >= KEEP_UNIQUE_HANG)
+      return keeping;
 
-      if (unique_hangs >= KEEP_UNIQUE_HANG) return keeping;
+    if (!dumb_mode)
+    {
 
-      if (!dumb_mode) {
+      u8 retrace_fault;
+
+      /* The oracle trace from the hanging run is too sparse to dedupe
+         against virgin_tmout. Re-run on target_path with the generous
+         hang timeout - this both confirms it's a real hang (not a
+         scheduler fluke under the tight exec_tmout) and gives us a
+         full trace to classify it with. */
+
+      write_to_testcase(mem, len);
+      retrace_fault = run_target(argv, hang_tmout, 0);
+
+      if (stop_soon)
+        return keeping;
+
+      /* Corner case from the original code: a longer timeout can
+         uncover an actual crash instead of a hang. */
+
+      if (retrace_fault == FAULT_CRASH)
+        goto keep_as_crash;
+
+      if (retrace_fault != FAULT_TMOUT)
+        return keeping;
 
 #ifdef WORD_SIZE_64
-        simplify_trace((u64*)trace_bits);
+      simplify_trace((u64 *)trace_bits);
 #else
-        simplify_trace((u32*)trace_bits);
-#endif /* ^WORD_SIZE_64 */
+      simplify_trace((u32 *)trace_bits);
+#endif
 
-        if (!has_new_bits(virgin_tmout)) return keeping;
+      if (!has_new_bits(virgin_tmout))
+        return keeping;
+    }
 
-      }
+    unique_tmouts++;
 
-      unique_tmouts++;
+#ifndef SIMPLE_FILES
+    fn = alloc_printf("%s/hangs/id:%06llu,%s", out_dir,
+                      unique_hangs, describe_op(0));
+#else
+    fn = alloc_printf("%s/hangs/id_%06llu", out_dir,
+                      unique_hangs);
+#endif
 
-      /* Before saving, we make sure that it's a genuine hang by re-running
-         the target with a more generous timeout (unless the default timeout
-         is already generous). */
+    unique_hangs++;
+    last_hang_time = get_cur_time();
 
-      if (exec_tmout < hang_tmout) {
+    break;
+  }
 
-        u8 new_fault;
+  case FAULT_CRASH:
+
+  keep_as_crash:
+
+    total_crashes++;
+
+    if (unique_crashes >= KEEP_UNIQUE_CRASH)
+      return keeping;
+
+    if (!dumb_mode)
+    {
+
+      /* Same reasoning as timeouts: re-run on target_path for a full,
+         comparable trace before deduping against virgin_crash. Skip
+         this if we arrived here via the tmout path above, since
+         trace_bits is already a target_path trace in that case. */
+
+      if (fault != FAULT_TMOUT)
+      {
+
+        u8 cf;
+
         write_to_testcase(mem, len);
-        new_fault = run_target(argv, hang_tmout);
+        cf = run_target(argv, exec_tmout, 0);
 
-        /* A corner case that one user reported bumping into: increasing the
-           timeout actually uncovers a crash. Make sure we don't discard it if
-           so. */
+        if (stop_soon)
+          return keeping;
 
-        if (!stop_soon && new_fault == FAULT_CRASH) goto keep_as_crash;
+        /* If it doesn't reproduce as a crash on target_path, something
+           is off (timing-sensitive bug, OOM under oracle vs target,
+           etc). Bail rather than save a possibly-misclassified input. */
 
-        if (stop_soon || new_fault != FAULT_TMOUT) return keeping;
-
+        if (cf != FAULT_CRASH)
+          return keeping;
       }
-
-#ifndef SIMPLE_FILES
-
-      fn = alloc_printf("%s/hangs/id:%06llu,%s", out_dir,
-                        unique_hangs, describe_op(0));
-
-#else
-
-      fn = alloc_printf("%s/hangs/id_%06llu", out_dir,
-                        unique_hangs);
-
-#endif /* ^!SIMPLE_FILES */
-
-      unique_hangs++;
-
-      last_hang_time = get_cur_time();
-
-      break;
-
-    case FAULT_CRASH:
-
-keep_as_crash:
-
-      /* This is handled in a manner roughly similar to timeouts,
-         except for slightly different limits and no need to re-run test
-         cases. */
-
-      total_crashes++;
-
-      if (unique_crashes >= KEEP_UNIQUE_CRASH) return keeping;
-
-      if (!dumb_mode) {
 
 #ifdef WORD_SIZE_64
-        simplify_trace((u64*)trace_bits);
+      simplify_trace((u64 *)trace_bits);
 #else
-        simplify_trace((u32*)trace_bits);
-#endif /* ^WORD_SIZE_64 */
+      simplify_trace((u32 *)trace_bits);
+#endif
 
-        if (!has_new_bits(virgin_crash)) return keeping;
+      if (!has_new_bits(virgin_crash))
+        return keeping;
+    }
 
-      }
-
-      if (!unique_crashes) write_crash_readme();
+    if (!unique_crashes)
+      write_crash_readme();
 
 #ifndef SIMPLE_FILES
-
-      fn = alloc_printf("%s/crashes/id:%06llu,sig:%02u,%s", out_dir,
-                        unique_crashes, kill_signal, describe_op(0));
-
+    fn = alloc_printf("%s/crashes/id:%06llu,sig:%02u,%s", out_dir,
+                      unique_crashes, kill_signal, describe_op(0));
 #else
+    fn = alloc_printf("%s/crashes/id_%06llu_%02u", out_dir, unique_crashes,
+                      kill_signal);
+#endif
 
-      fn = alloc_printf("%s/crashes/id_%06llu_%02u", out_dir, unique_crashes,
-                        kill_signal);
+    unique_crashes++;
+    last_crash_time = get_cur_time();
+    last_crash_execs = total_execs;
 
-#endif /* ^!SIMPLE_FILES */
+    break;
 
-      unique_crashes++;
+  case FAULT_ERROR:
+    FATAL("Unable to execute target application");
 
-      last_crash_time = get_cur_time();
-      last_crash_execs = total_execs;
-
-      break;
-
-    case FAULT_ERROR: FATAL("Unable to execute target application");
-
-    default: return keeping;
-
+  default:
+    return keeping;
   }
-
-  /* If we're here, we apparently want to save the crash or hang
-     test case, too. */
 
   fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-  if (fd < 0) PFATAL("Unable to create '%s'", fn);
+  if (fd < 0)
+    PFATAL("Unable to create '%s'", fn);
   ck_write(fd, mem, len, fn);
   close(fd);
 
   ck_free(fn);
 
   return keeping;
-
 }
-
 
 /* When resuming, try to find the queue position to start from. This makes sense
    only when resuming, and when we can find the original fuzzer_stats. */
@@ -4208,7 +4252,8 @@ static void show_stats(void) {
 
   /* Do some bitmap stats. */
 
-  t_bytes = count_non_255_bytes(virgin_bits);
+  t_bytes = count_bytes(virgin_bits); /* edges seen */
+
   t_byte_ratio = ((double)t_bytes * 100) / MAP_SIZE;
 
   if (t_bytes) 
@@ -4249,7 +4294,7 @@ static void show_stats(void) {
 
   /* Compute some mildly useful bitmap stats. */
 
-  t_bits = (MAP_SIZE << 3) - count_bits(virgin_bits);
+  t_bits = MAP_SIZE - t_bytes; /* or drop the "bits/tuple" stat entirely */
 
   /* Now, for the visuals... */
 
@@ -4791,7 +4836,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf) {
 
       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-      fault = run_target(argv, exec_tmout);
+      fault = run_target(argv, exec_tmout, 0); /* target_path - needs comparable full trace */
       trim_execs++;
 
       if (stop_soon || fault == FAULT_ERROR) goto abort_trimming;
@@ -4884,7 +4929,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   write_to_testcase(out_buf, len);
 
-  fault = run_target(argv, exec_tmout);
+  fault = run_target(argv, exec_tmout, 1);
 
   if (stop_soon) return 1;
 
@@ -5230,6 +5275,7 @@ static u8 fuzz_one(char** argv) {
   u8  *in_buf, *out_buf, *orig_in, *ex_tmp, *eff_map = 0;
   u64 havoc_queued,  orig_hit_cnt, new_hit_cnt;
   u32 splice_cycle = 0, perf_score = 100, orig_perf, prev_cksum, eff_cnt = 1;
+  u32 base_cksum; 
 
   u8  ret_val = 1, doing_det = 0;
 
@@ -5381,6 +5427,23 @@ static u8 fuzz_one(char** argv) {
 
   doing_det = 1;
 
+  write_to_testcase(out_buf, len);
+
+  {
+    u8 base_fault = run_target(argv, exec_tmout, 1);
+
+    if (stop_soon)
+    {
+      cur_skipped_paths++;
+      goto abandon_entry;
+    }
+
+    if (base_fault == FAULT_ERROR)
+      FATAL("Unable to execute target application");
+  }
+
+  base_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+
   /*********************************************
    * SIMPLE BITFLIP (+dictionary construction) *
    *********************************************/
@@ -5401,7 +5464,7 @@ static u8 fuzz_one(char** argv) {
 
   orig_hit_cnt = queued_paths + unique_crashes;
 
-  prev_cksum = queue_cur->exec_cksum;
+  prev_cksum = base_cksum; /* was: queue_cur->exec_cksum */
 
   for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
@@ -5471,13 +5534,12 @@ static u8 fuzz_one(char** argv) {
       /* Continue collecting string, but only if the bit flip actually made
          any difference - we don't want no-op tokens. */
 
-      if (cksum != queue_cur->exec_cksum) {
+      if (cksum != prev_cksum)
+      {
 
         if (a_len < MAX_AUTO_EXTRA) a_collect[a_len] = out_buf[stage_cur >> 3];        
         a_len++;
-
       }
-
     }
 
   }
@@ -5600,13 +5662,13 @@ static u8 fuzz_one(char** argv) {
       if (!dumb_mode && len >= EFF_MIN_LEN)
         cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
       else
-        cksum = ~queue_cur->exec_cksum;
+        cksum = ~base_cksum; /* was: ~queue_cur->exec_cksum */
 
-      if (cksum != queue_cur->exec_cksum) {
+      if (cksum != base_cksum) { /* was: queue_cur->exec_cksum */
+
         eff_map[EFF_APOS(stage_cur)] = 1;
         eff_cnt++;
       }
-
     }
 
     out_buf[stage_cur] ^= 0xFF;
@@ -7019,7 +7081,7 @@ static void sync_fuzzers(char** argv) {
 
         write_to_testcase(mem, st.st_size);
 
-        fault = run_target(argv, exec_tmout);
+        fault = run_target(argv, exec_tmout, 1); /* oracle_path, same as common_fuzz_stuff */
 
         if (stop_soon) return;
 
@@ -7095,67 +7157,96 @@ static void handle_timeout(int sig) {
    isn't a shell script - a common and painful mistake. We also check for
    a valid ELF header and for evidence of AFL instrumentation. */
 
-EXP_ST void check_binary(u8* target_name, u8 *oracle_name) {
+EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
+{
 
-  u8* env_path = 0;
+  u8 *env_path = 0;
   struct stat st_target;
   struct stat st_oracle;
 
   s32 fd;
-  u8* f_data;
+  u8 *f_data;
   u32 f_len = 0;
 
   ACTF("Validating target binary...");
 
-  if (strchr(target_name, '/') || strchr(oracle_name, '/') || !(env_path = getenv("PATH"))) {
+  if (strchr(target_name, '/') || strchr(oracle_name, '/') ||
+      !(env_path = getenv("PATH")))
+  {
 
     target_path = ck_strdup(target_name);
     oracle_path = ck_strdup(oracle_name);
+
     if (stat(target_path, &st_target) || !S_ISREG(st_target.st_mode) ||
         !(st_target.st_mode & 0111) || (f_len = st_target.st_size) < 4)
       FATAL("Program '%s' not found or not executable", target_name);
 
-  } else if (stat(oracle_path, &st_oracle) || !S_ISREG(st_oracle.st_mode) ||
-        !(st_oracle.st_mode & 0111) || (f_len = st_oracle.st_size) < 4)  {
-        FATAL("Program '%s' not found or not executable", oracle_name);
-        }
-  else {
+    if (stat(oracle_path, &st_oracle) || !S_ISREG(st_oracle.st_mode) ||
+        !(st_oracle.st_mode & 0111) || st_oracle.st_size < 4)
+      FATAL("Program '%s' not found or not executable", oracle_name);
+  }
+  else
+  {
 
-    while (env_path) {
+    u8 target_found = 0, oracle_found = 0;
+
+    while (env_path)
+    {
 
       u8 *cur_elem, *delim = strchr(env_path, ':');
+      u8 *cand_target, *cand_oracle;
 
-      if (delim) {
-
+      if (delim)
+      {
         cur_elem = ck_alloc(delim - env_path + 1);
         memcpy(cur_elem, env_path, delim - env_path);
         delim++;
-
-      } else cur_elem = ck_strdup(env_path);
+      }
+      else
+        cur_elem = ck_strdup(env_path);
 
       env_path = delim;
 
-      if (cur_elem[0]) {
-        target_path = alloc_printf("%s/%s", cur_elem, target_name);
-        oracle_path = alloc_printf("%s/%s", cur_elem, oracle_name);
-      } else {
-          target_path = ck_strdup(target_name);
-          oracle_path = ck_strdup(oracle_name);
+      if (cur_elem[0])
+      {
+        cand_target = alloc_printf("%s/%s", cur_elem, target_name);
+        cand_oracle = alloc_printf("%s/%s", cur_elem, oracle_name);
+      }
+      else
+      {
+        cand_target = ck_strdup(target_name);
+        cand_oracle = ck_strdup(oracle_name);
       }
       ck_free(cur_elem);
 
-      if (!stat(target_path, &st_target) && S_ISREG(st_target.st_mode) &&
-          (st_target.st_mode & 0111) && (f_len = st_target.st_size) >= 4) break;
-      if (!stat(oracle_path, &st_oracle) && S_ISREG(st_oracle.st_mode) &&
-          (st_oracle.st_mode & 0111) && (f_len = st_oracle.st_size) >= 4) break;
-      ck_free(target_path);
-      target_path = 0;
+      if (!target_found && !stat(cand_target, &st_target) &&
+          S_ISREG(st_target.st_mode) && (st_target.st_mode & 0111) &&
+          (f_len = st_target.st_size) >= 4)
+      {
+        target_path = cand_target;
+        target_found = 1;
+      }
+      else
+        ck_free(cand_target);
 
+      if (!oracle_found && !stat(cand_oracle, &st_oracle) &&
+          S_ISREG(st_oracle.st_mode) && (st_oracle.st_mode & 0111) &&
+          st_oracle.st_size >= 4)
+      {
+        oracle_path = cand_oracle;
+        oracle_found = 1;
+      }
+      else
+        ck_free(cand_oracle);
+
+      if (target_found && oracle_found)
+        break;
     }
 
-    if (!target_path) FATAL("Program '%s' not found or not executable", target_name);
-    if (!oracle_path) FATAL("Program '%s' not found or not executable", oracle_name);
-
+    if (!target_found)
+      FATAL("Program '%s' not found or not executable", target_name);
+    if (!oracle_found)
+      FATAL("Program '%s' not found or not executable", oracle_name);
   }
 
   if (getenv("AFL_SKIP_BIN_CHECK")) return;
@@ -7266,9 +7357,7 @@ EXP_ST void check_binary(u8* target_name, u8 *oracle_name) {
   }
 
   if (munmap(f_data, f_len)) PFATAL("unmap() failed");
-
 }
-
 
 /* Trim and possibly create a banner for the run. */
 
@@ -7502,6 +7591,13 @@ EXP_ST void setup_dirs_fds(void) {
                      "pending_total, pending_favs, map_size, unique_crashes, "
                      "unique_hangs, max_depth, execs_per_sec\n");
                      /* ignore errors */
+  FILE *meta_data_fp = fopen("./output/meta_data.txt", "a");
+  if (meta_data_fp == NULL)
+  {
+    perror("failed to meta data txt");
+    exit(EXIT_FAILURE);
+  }
+
 }
 
 
@@ -7949,7 +8045,8 @@ int main(int argc, char** argv) {
 
   SAYF(cCYA "afl-fuzz " cBRI VERSION cRST " by <lcamtuf@google.com>\n");
 
-  doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
+  // doc_path = access(DOC_PATH, F_OK) ? "docs" : DOC_PATH;
+  doc_path = "docs";
 
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
@@ -8213,7 +8310,6 @@ int main(int argc, char** argv) {
 
   if (!timeout_given) find_timeout();
 
-  detect_file_args(argv + optind + 1);
 
   if (!out_file) setup_stdio_file();
 
@@ -8222,6 +8318,7 @@ int main(int argc, char** argv) {
   start_time = get_cur_time();
 
   use_argv = argv + optind;
+  detect_file_args(use_argv + 1);
 
   perform_dry_run(use_argv);
 
@@ -8322,8 +8419,6 @@ int main(int argc, char** argv) {
   save_auto();
 
 stop_fuzzing:
-
-  write_meta_indices();
 
   SAYF(CURSOR_SHOW cLRD "\n\n+++ Testing aborted %s +++\n" cRST,
        stop_soon == 2 ? "programmatically" : "by user");
