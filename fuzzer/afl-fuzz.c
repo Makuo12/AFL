@@ -7404,7 +7404,7 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
          "    For that, you can use the -n option - but expect much worse results.)\n",
          doc_path);
 
-    FATAL("No instrumentation detected");
+    WARNF("No instrumentation detected");
   }
 
   // if (qemu_mode &&
