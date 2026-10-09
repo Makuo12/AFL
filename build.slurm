@@ -28,7 +28,7 @@ else
 fi
 
 echo "Building afl_fuzz"
-make afl-fuzz
+make $wrap/fuzzer/afl-fuzz
 
 PERF_FLAGS="-O3 -funroll-loops -g -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden"
 
@@ -42,7 +42,7 @@ mkdir -p $wrap/output
 echo "Building llvm passes"
 rm -rf $wrap/build
 
-cmake -S $wrap/src -B $wrap/build \
+cmake -B $wrap/build \
       -DLLVM_DIR=$LIB_PATH/cmake/llvm \
       -DCMAKE_BUILD_TYPE=Release 2>&1 | cat
 make -j$(nproc)
