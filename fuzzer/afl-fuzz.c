@@ -3681,24 +3681,43 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps) {
 
 /* Update the plot file if there is a reason to. */
 
-static void maybe_update_plot_file(double bitmap_cvg, double eps) {
+// static void maybe_update_plot_file(double bitmap_cvg, double eps) {
 
-  static u32 prev_qp, prev_pf, prev_pnf, prev_ce, prev_md;
-  static u64 prev_qc, prev_uc, prev_uh;
+//   static u32 prev_qp, prev_pf, prev_pnf, prev_ce, prev_md;
+//   static u64 prev_qc, prev_uc, prev_uh;
 
-  if (prev_qp == queued_paths && prev_pf == pending_favored && 
-      prev_pnf == pending_not_fuzzed && prev_ce == current_entry &&
-      prev_qc == queue_cycle && prev_uc == unique_crashes &&
-      prev_uh == unique_hangs && prev_md == max_depth) return;
+//   if (prev_qp == queued_paths && prev_pf == pending_favored && 
+//       prev_pnf == pending_not_fuzzed && prev_ce == current_entry &&
+//       prev_qc == queue_cycle && prev_uc == unique_crashes &&
+//       prev_uh == unique_hangs && prev_md == max_depth) return;
 
-  prev_qp  = queued_paths;
-  prev_pf  = pending_favored;
-  prev_pnf = pending_not_fuzzed;
-  prev_ce  = current_entry;
-  prev_qc  = queue_cycle;
-  prev_uc  = unique_crashes;
-  prev_uh  = unique_hangs;
-  prev_md  = max_depth;
+//   prev_qp  = queued_paths;
+//   prev_pf  = pending_favored;
+//   prev_pnf = pending_not_fuzzed;
+//   prev_ce  = current_entry;
+//   prev_qc  = queue_cycle;
+//   prev_uc  = unique_crashes;
+//   prev_uh  = unique_hangs;
+//   prev_md  = max_depth;
+
+//   /* Fields in the file:
+
+//      unix_time, cycles_done, cur_path, paths_total, paths_not_fuzzed,
+//      favored_not_fuzzed, unique_crashes, unique_hangs, max_depth,
+//      execs_per_sec, total_execs */
+
+//   fprintf(plot_file,
+//           "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %llu\n",
+//           get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
+//           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
+//           unique_hangs, max_depth, eps, total_execs);
+
+//   fflush(plot_file);
+
+// }
+
+static void maybe_update_plot_file(double bitmap_cvg, double eps)
+{
 
   /* Fields in the file:
 
@@ -3713,10 +3732,7 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps) {
           unique_hangs, max_depth, eps, total_execs);
 
   fflush(plot_file);
-
 }
-
-
 
 /* A helper function for maybe_delete_out_dir(), deleting all prefixed
    files in a directory. */

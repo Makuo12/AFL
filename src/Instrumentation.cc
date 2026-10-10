@@ -104,7 +104,7 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
         if (!shouldProcessFunction(F))
             continue;
         // handlePCTable(F, M); // not needed for de-instrumentation
-        // instrumentBlocks(F, seen, wholeCount);
+        instrumentBlocks(F, seen, wholeCount);
         // for (BasicBlock &BB : llvm::make_early_inc_range(F))
         //     handleDefaultBlockEdge(*BB.getTerminator(), wholeCount, seen);
         // for (BasicBlock &BB : llvm::make_early_inc_range(F))
