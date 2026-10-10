@@ -6738,10 +6738,10 @@ havoc_stage:
 
     if (queued_paths != havoc_queued) {
 
-      if (perf_score <= HAVOC_MAX_MULT * 100) {
-        stage_max  *= 2;
-        perf_score *= 2;
-      }
+      // if (perf_score <= HAVOC_MAX_MULT * 100) {
+      //   stage_max  *= 2;
+      //   perf_score *= 2;
+      // }
 
       havoc_queued = queued_paths;
 
