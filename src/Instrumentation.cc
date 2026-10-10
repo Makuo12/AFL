@@ -107,8 +107,8 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
         instrumentBlocks(F, seen, wholeCount);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
             handleDefaultBlockEdge(*BB.getTerminator(), wholeCount, seen);
-        // for (BasicBlock &BB : llvm::make_early_inc_range(F))
-        //     handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
+        for (BasicBlock &BB : llvm::make_early_inc_range(F))
+            handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
             handleIfEdges(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))

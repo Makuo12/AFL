@@ -185,69 +185,71 @@ u8 DE_INSTRUMENTED = 0;                            /* De-instrumented binary if 
     current_entry,           /* Current queue entry ID           */
     havoc_div = 1;           /* Cycle count divisor for havoc    */
 
-EXP_ST u64 total_crashes,             /* Total number of crashes          */
-           unique_crashes,            /* Crashes with unique signatures   */
-           total_tmouts,              /* Total number of timeouts         */
-           unique_tmouts,             /* Timeouts with unique signatures  */
-           unique_hangs,              /* Hangs with unique signatures     */
-           total_execs,               /* Total execve() calls             */
-           slowest_exec_ms,           /* Slowest testcase non hang in ms  */
-           start_time,                /* Unix start time (ms)             */
-           last_path_time,            /* Time for most recent path (ms)   */
-           last_crash_time,           /* Time for most recent crash (ms)  */
-           last_hang_time,            /* Time for most recent hang (ms)   */
-           last_crash_execs,          /* Exec counter at last crash       */
-           queue_cycle,               /* Queue round counter              */
-           cycles_wo_finds,           /* Cycles without any new paths     */
-           trim_execs,                /* Execs done to trim input files   */
-           bytes_trim_in,             /* Bytes coming into the trimmer    */
-           bytes_trim_out,            /* Bytes coming outa the trimmer    */
-           blocks_eff_total,          /* Blocks subject to effector maps  */
-           blocks_eff_select;         /* Blocks selected as fuzzable      */
+    EXP_ST u64 total_crashes, /* Total number of crashes          */
+        unique_crashes,       /* Crashes with unique signatures   */
+        all_timeouts,         /* Every timeout seen in run_target */
+        total_tmouts,      /* Total number of timeouts         */
+        unique_tmouts,     /* Timeouts with unique signatures  */
+        unique_hangs,      /* Hangs with unique signatures     */
+        total_execs,       /* Total execve() calls             */
+        slowest_exec_ms,   /* Slowest testcase non hang in ms  */
+        start_time,        /* Unix start time (ms)             */
+        last_path_time,    /* Time for most recent path (ms)   */
+        last_crash_time,   /* Time for most recent crash (ms)  */
+        last_hang_time,    /* Time for most recent hang (ms)   */
+        last_crash_execs,  /* Exec counter at last crash       */
+        queue_cycle,       /* Queue round counter              */
+        cycles_wo_finds,   /* Cycles without any new paths     */
+        trim_execs,        /* Execs done to trim input files   */
+        bytes_trim_in,     /* Bytes coming into the trimmer    */
+        bytes_trim_out,    /* Bytes coming outa the trimmer    */
+        blocks_eff_total,  /* Blocks subject to effector maps  */
+        blocks_eff_select; /* Blocks selected as fuzzable      */
 
-static u32 subseq_tmouts;             /* Number of timeouts in a row      */
+    static u32 subseq_tmouts; /* Number of timeouts in a row      */
 
-static u8 *stage_name = "init",       /* Name of the current fuzz stage   */
-          *stage_short,               /* Short stage name                 */
-          *syncing_party;             /* Currently syncing with...        */
+    static u8 *stage_name = "init", /* Name of the current fuzz stage   */
+        *stage_short,               /* Short stage name                 */
+        *syncing_party;             /* Currently syncing with...        */
 
-static s32 stage_cur, stage_max;      /* Stage progression                */
-static s32 splicing_with = -1;        /* Splicing with which test case?   */
+    static s32 stage_cur, stage_max; /* Stage progression                */
+    static s32 splicing_with = -1;   /* Splicing with which test case?   */
 
-static u32 master_id, master_max;     /* Master instance job splitting    */
+    static u32 master_id, master_max; /* Master instance job splitting    */
 
-static u32 syncing_case;              /* Syncing with case #...           */
+    static u32 syncing_case; /* Syncing with case #...           */
 
-static s32 stage_cur_byte,            /* Byte offset of current stage op  */
-           stage_cur_val;             /* Value used for stage op          */
+    static s32 stage_cur_byte, /* Byte offset of current stage op  */
+        stage_cur_val;         /* Value used for stage op          */
 
-static u8  stage_val_type;            /* Value type (STAGE_VAL_*)         */
+    static u8 stage_val_type; /* Value type (STAGE_VAL_*)         */
 
-static u64 stage_finds[32],           /* Patterns found per fuzz stage    */
-           stage_cycles[32];          /* Execs per fuzz stage             */
+    static u64 stage_finds[32], /* Patterns found per fuzz stage    */
+        stage_cycles[32];       /* Execs per fuzz stage             */
 
-static u32 rand_cnt;                  /* Random number counter            */
+    static u32 rand_cnt; /* Random number counter            */
 
-static u64 total_cal_us,              /* Total calibration time (us)      */
-           total_cal_cycles;          /* Total calibration cycles         */
+    static u64 total_cal_us, /* Total calibration time (us)      */
+        total_cal_cycles;    /* Total calibration cycles         */
 
-static u64 total_bitmap_size,         /* Total bit count for all bitmaps  */
-           total_bitmap_entries;      /* Number of bitmaps counted        */
+    static u64 total_bitmap_size, /* Total bit count for all bitmaps  */
+        total_bitmap_entries;     /* Number of bitmaps counted        */
 
-static s32 cpu_core_count;            /* CPU core count                   */
+    static s32 cpu_core_count; /* CPU core count                   */
 
 #ifdef HAVE_AFFINITY
 
-static s32 cpu_aff = -1;       	      /* Selected CPU core                */
+    static s32 cpu_aff = -1; /* Selected CPU core                */
 
 #endif /* HAVE_AFFINITY */
 
-static FILE* plot_file;               /* Gnuplot output file              */
+    static FILE *plot_file; /* Gnuplot output file              */
 
-typedef struct {
-  int32_t index;
-  UT_hash_handle hh;
-} MetaIndex;
+    typedef struct
+    {
+      int32_t index;
+      UT_hash_handle hh;
+    } MetaIndex;
 
 static MetaIndex *meta_indices;
 
@@ -2282,6 +2284,7 @@ EXP_ST void init_forkserver(char** argv) {
 
   if (mem_limit && mem_limit < 500 && uses_asan) {
 
+
     SAYF("\n" cLRD "[-] " cRST
            "Hmm, looks like the target binary terminated before we could complete a\n"
            "    handshake with the injected code. Since it seems to be built with ASAN and\n"
@@ -2521,7 +2524,11 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
 
     kill_signal = WTERMSIG(status);
 
-    if (child_timed_out && kill_signal == SIGKILL) return FAULT_TMOUT;
+    if (child_timed_out && kill_signal == SIGKILL)
+    {
+      all_timeouts++; /* count every timeout, whatever the caller */
+      return FAULT_TMOUT;
+    }
 
     return FAULT_CRASH;
 
@@ -3726,10 +3733,10 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps)
      execs_per_sec, total_execs */
 
   fprintf(plot_file,
-          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %llu\n",
+          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %llu, %llu\n",
           get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
-          unique_hangs, max_depth, eps, total_execs);
+          unique_hangs, max_depth, eps, total_execs, all_timeouts);
 
   fflush(plot_file);
 }
@@ -7512,7 +7519,8 @@ EXP_ST void setup_dirs_fds(void) {
 
   fprintf(plot_file, "# unix_time, cycles_done, cur_path, paths_total, "
                      "pending_total, pending_favs, map_size, unique_crashes, "
-                     "unique_hangs, max_depth, execs_per_sec, total_execs\n");
+                     "unique_hangs, max_depth, execs_per_sec, total_execs, "
+                     "all_timeouts\n");
   /* ignore errors */
   FILE *meta_data_fp = fopen("./output/meta_data.txt", "a");
   if (meta_data_fp == NULL)
