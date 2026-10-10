@@ -105,14 +105,14 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
             continue;
         // handlePCTable(F, M); // not needed for de-instrumentation
         // instrumentBlocks(F, seen, wholeCount);
-        for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleDefaultBlockEdge(*BB.getTerminator(), wholeCount, seen);
-        for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
+        // for (BasicBlock &BB : llvm::make_early_inc_range(F))
+        //     handleDefaultBlockEdge(*BB.getTerminator(), wholeCount, seen);
+        // for (BasicBlock &BB : llvm::make_early_inc_range(F))
+        //     handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
             handleIfEdges(*BB.getTerminator(), wholeCount, seen);
-        for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleInvokeEdges(*BB.getTerminator(), wholeCount, seen);
+        // for (BasicBlock &BB : llvm::make_early_inc_range(F))
+        //     handleInvokeEdges(*BB.getTerminator(), wholeCount, seen);
     }
     // ---- Phase 2: count loop headers, create the array + reset body ----
     // unsigned N = countLoopHeaders(M);
