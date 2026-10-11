@@ -7,7 +7,6 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/shm.h>
-#include <setjmp.h>
 #include <getopt.h>
 #include <string.h>
 #include <stdlib.h>
@@ -16,7 +15,6 @@
 #include <stdio.h>
 #include "uthash.h"
 #include "data.h"
-#include "global.h"
 #include "config.h"
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
@@ -35,7 +33,6 @@ typedef unsigned char u8;
 uint32_t *virgin_bits;
 uint32_t *trace_bits;
 
-sigjmp_buf env;
 
 typedef struct
 {
@@ -89,7 +86,6 @@ void make_range_writable(uintptr_t start, uintptr_t end)
         HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
     }
 }
-
 
 static inline void record_hit(int32_t idx, uint32_t val, int is_loop)
 {
@@ -295,57 +291,30 @@ void setup_shm(void)
     }
 }
 
-void clean_up()
-{
-    close_open_file_handles();
-    free_ptrs();
-    int result = __untracer_restore_global();
-    if (result < 0)
-    {
-        log_line("Global section restoration failed in clean_up().");
-        exit(EXIT_FAILURE);
-    }
-}
-
-void exitHook(int status)
-{
-    siglongjmp(env, -1);
-}
-
 static void run_persistent(char *argv0, char *input)
 {
     uint32_t msg = 0;
 
     /* If fd 199 isn't open we're not under afl-fuzz: run once and exit. */
     int standalone = (write(FORKSRV_FD + 1, &msg, 4) != 4);
-    char *args[] = {argv0, input, "/dev/null", NULL};
+
     for (;;)
     {
         if (!standalone)
         {
             uint32_t cmd;
             if (read(FORKSRV_FD, &cmd, 4) != 4)
-                _exit(0);
-            uint32_t pid = getpid(); /* see point 3 */
-            if (write(FORKSRV_FD + 1, &pid, 4) != 4)
-                _exit(0);
+                _exit(0); /* afl went away */
         }
 
-        int r = sigsetjmp(env, 1);
-        if (r > 0)
-            _exit(0); /* crash path, handle later */
-        if (r == 0)
-        {
-            optind = 0;
-            target_main(3, args);
-        }
-        /* r == 0: returned normally. r < 0: exitHook fired. Same cleanup. */
-        // clean_up();
+        char *args[] = {argv0, input, "/dev/null", NULL};
+        optind = 0; /* make getopt in target_main restart */
+        target_main(3, args);
 
         if (standalone)
             exit(0);
 
-        uint32_t status = 0;
+        uint32_t status = 0; /* must be 0, see above */
         if (write(FORKSRV_FD + 1, &status, 4) != 4)
             _exit(0);
     }
@@ -360,7 +329,6 @@ int main(int argc, char **argv)
     }
     setup_shm();
     setup_signal();
-    __untracer_setup_global();
     run_persistent(argv[0], argv[1]);
     return 0;
 }
