@@ -340,7 +340,7 @@ static void run_persistent(char *argv0, char *input)
             target_main(3, args);
         }
         /* r == 0: returned normally. r < 0: exitHook fired. Same cleanup. */
-        clean_up();
+        // clean_up();
 
         if (standalone)
             exit(0);
