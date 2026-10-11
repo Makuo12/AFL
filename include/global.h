@@ -4,6 +4,17 @@
 #include <stdint.h>
 void free_ptrs(void);
 void close_open_file_handles(void);
-void __untracer_setup_global(void);
-int __untracer_restore_global(void);
+
+/* Defined in global.c; C linkage so they link whether global.c is compiled
+ * as C or C++ and whether the caller is C or C++. */
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+    void __untracer_setup_global(void);
+    int __untracer_restore_global(void);
+#ifdef __cplusplus
+}
+#endif
+
 #endif
