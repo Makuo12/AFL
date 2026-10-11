@@ -1,5 +1,8 @@
 #include "common.h"
-#include "PCTablePass.h"
+#include "ExitPass.h"
+#include "FilePass.h"
+#include "GlobalPass.h"
+#include "HeapPass.h"
 #include "RenameMain.h"
 using namespace llvm;
 
@@ -18,6 +21,10 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                     if (Name == "rename")
                     {
                         MPM.addPass(RenameMainPass());
+                        MPM.addPass(HeapResetPass());
+                        MPM.addPass(ExitHookPass());
+                        MPM.addPass(CloneGlobalsPass());
+                        MPM.addPass(FileHookPass());
                         return true;
                     }
                     return false;

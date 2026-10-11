@@ -7,6 +7,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/shm.h>
+#include <setjmp.h>
 #include <getopt.h>
 #include <string.h>
 #include <stdlib.h>
@@ -33,6 +34,7 @@ typedef unsigned char u8;
 uint32_t *virgin_bits;
 uint32_t *trace_bits;
 
+sigjmp_buf env;
 
 typedef struct
 {
@@ -297,6 +299,23 @@ void setup_shm(void)
     }
 }
 
+void clean_up()
+{
+    close_open_file_handles();
+    free_ptrs();
+    int result = __untracer_restore_global();
+    if (result < 0)
+    {
+        log_line("Global section restoration failed in clean_up().");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void exitHook(int status)
+{
+    siglongjmp(env, -1);
+}
+
 static void run_persistent(char *argv0, char *input)
 {
     uint32_t msg = 0;
@@ -312,11 +331,17 @@ static void run_persistent(char *argv0, char *input)
             if (read(FORKSRV_FD, &cmd, 4) != 4)
                 _exit(0); /* afl went away */
         }
-
+        int r = sigsetjmp(env, 1);
+        if (r > 0)
+        {
+            // already goes to crash_handler, so just exit
+            _exit(0);
+        }
         char *args[] = {argv0, input, "/dev/null", NULL};
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
-
+        clean_up();
+        
         if (standalone)
             exit(0);
 
@@ -335,6 +360,7 @@ int main(int argc, char **argv)
     }
     setup_shm();
     setup_signal();
+    __untracer_setup_global();
     run_persistent(argv[0], argv[1]);
     return 0;
 }

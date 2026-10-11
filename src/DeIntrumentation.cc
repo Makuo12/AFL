@@ -773,7 +773,7 @@ int main(int argc, char **argv)
     }
     removeIfEdgeInstrumentation(metaIds, elseArmTraps);
     removeDefaultBlockInstrumentation(metaIds, defaultSwitchTraps);
-    removeSwitchFallthroughInstrumentation(metaIds, fellthroughSwitchTraps);
+    // removeSwitchFallthroughInstrumentation(metaIds, fellthroughSwitchTraps);
     removeInvokeInstrumentation(metaIds, invokeTraps);
     removeBlockInstrumentation(metaIds, blockTraps);
     removeLoopInstrumentation(metaIds, loopCountTraps);
