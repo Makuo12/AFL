@@ -18,6 +18,10 @@ export AFL_NO_UI=1
 # export AFL_NO_FORKSRV=1  
 export AFL_NO_AFFINITY=1
 
+export AFL_DISABLE_TRIM=1
+export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
+export AFL_NO_SYNC=1                    # don't import other instances' inputs
+
 FUZZ_SECONDS=$((1*60*60))
 TRACE="main.trace"
 ORACLE="main.oracle"
@@ -90,17 +94,14 @@ fi
 # Assumes one cpu per task
 CPU=$(grep Cpus_allowed_list /proc/self/status | awk '{print $2}')
 
-export AFL_DISABLE_TRIM=1
-export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
-export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 1000 -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 2048 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 1000 -m 1536 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 2048 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 
