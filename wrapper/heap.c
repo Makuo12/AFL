@@ -3,37 +3,43 @@
 #include "uthash.h"
 #include "global.h"
 
+/* NOTE: this file must call the REAL malloc/calloc/realloc/free.
+ * Make sure global.h does not #define malloc -> myMalloc (etc.),
+ * or the tracking code below would recurse forever. */
+
 typedef struct
 {
-    void *key;                                             /* we'll use this field as the key */
-    int i;                                                 /* this field is for the hashed object */
-    UT_hash_handle hh; /* makes this structure hashable */ // IDK how this works, they just said it does and it did
+    void *key;         /* the tracked heap pointer (hash key) */
+    UT_hash_handle hh; /* makes this structure hashable */
 } ptr_obj;
 
-ptr_obj *ptr_map = NULL;
+static ptr_obj *ptr_map = NULL;
 
-void add_ptr(void *key_ptr)
+static ptr_obj *find_ptr(void *ptr)
 {
-    ptr_obj *s;
-
-    s = (ptr_obj *)malloc(sizeof(ptr_obj));
-    s->key = key_ptr;
-    s->i = 1;
-    HASH_ADD_PTR(ptr_map, key, s); /* id: name of key field!!! LOOK MORE INTO THIS, REPLACE WITH THE CORRECT FUNCTION
-                                      FOR ADDING A VOID POINTER AND THEN RECREATE WITH FIND */
-}
-
-// Responsible for finding the pointer to confirm that
-ptr_obj *find_ptr(void *ptr_id)
-{
-    ptr_obj *s;
-
-    HASH_FIND_PTR(ptr_map, &ptr_id, s); // Change to the correct function for storing a void pointer, maybe this can be simplified.
+    ptr_obj *s = NULL;
+    /* HASH_FIND_PTR takes the ADDRESS of the key value */
+    HASH_FIND_PTR(ptr_map, &ptr, s);
     return s;
 }
 
-// Deletes the pointer object from the hash table
-void delete_ptr(ptr_obj *obj)
+/* Track a pointer. Ignores NULL and pointers that are already tracked
+ * (uthash does not check for duplicate keys, and a duplicate would make
+ * a later delete leave a stale entry behind). */
+static void add_ptr(void *ptr)
+{
+    if (ptr == NULL || find_ptr(ptr) != NULL)
+        return;
+
+    ptr_obj *s = (ptr_obj *)malloc(sizeof(*s));
+    if (s == NULL)
+        return; /* can't track it; it just won't be auto-freed */
+
+    s->key = ptr;
+    HASH_ADD_PTR(ptr_map, key, s);
+}
+
+static void delete_ptr(ptr_obj *obj)
 {
     if (obj != NULL)
     {
@@ -42,68 +48,52 @@ void delete_ptr(ptr_obj *obj)
     }
 }
 
-/*
- * myMalloc is a stub function for malloc which stores the returned void type pointer
- * inside of an array to be deallocated in the event that free is never called
- */
 void *myMalloc(size_t size)
 {
     void *tmp = malloc(size);
+    add_ptr(tmp); /* ignores NULL */
+    return tmp;
+}
+
+void *myCalloc(size_t nmemb, size_t size)
+{
+    void *tmp = calloc(nmemb, size);
     add_ptr(tmp);
     return tmp;
 }
 
-/*
- * myCalloc is a stub function for malloc which stores the returned void type pointer
- * inside of an array to be deallocated in the event that free is never called
- */
-void *myCalloc(size_t nmemb, size_t size)
-{
-    void *tmp = calloc(nmemb, size);
-    if (tmp != NULL)
-    {
-        add_ptr(tmp);
-    }
-    return tmp;
-}
-
-/*
- * myRealloc is a stub function for malloc which stores the returned void type pointer
- * inside of an array to be deallocated in the event that free is never called
- */
 void *myRealloc(void *ptr, size_t size)
 {
     void *tmp = realloc(ptr, size);
+
+    /* Failure with size != 0: the old block is still valid and must stay
+     * tracked, otherwise it would leak out of free_ptrs(). */
+    if (tmp == NULL && size != 0)
+        return NULL;
+
+    /* Success (or realloc(ptr, 0), which frees ptr): drop the old entry. */
     if (ptr != NULL)
-    {
-        ptr_obj *p = find_ptr(ptr);
-        delete_ptr(p);
-    }
-    if (tmp != NULL && size != 0)
-    {
-        add_ptr(tmp);
-    }
+        delete_ptr(find_ptr(ptr));
+
+    add_ptr(tmp); /* ignores NULL */
     return tmp;
 }
 
-/*
- * My Free is a stub function for free which removes the pointer
- * from the array of void pointers and then frees the passed in
- * pointer
- */
 void myFree(void *ptr)
 {
-    ptr_obj *p = find_ptr(ptr);
+    if (ptr == NULL)
+        return;
+    delete_ptr(find_ptr(ptr));
     free(ptr);
-    delete_ptr(p);
 }
 
+/* Free everything the target allocated and never freed. */
 void free_ptrs(void)
 {
     ptr_obj *s, *tmp;
     HASH_ITER(hh, ptr_map, s, tmp)
     {
         free(s->key);
-        delete_ptr(s);
+        delete_ptr(s); /* HASH_ITER saved the next pointer in tmp */
     }
 }

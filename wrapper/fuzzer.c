@@ -310,7 +310,7 @@ static void run_persistent(char *argv0, char *input)
         char *args[] = {argv0, input, "/dev/null", NULL};
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
-
+        // __untracer_restore_global();
         if (standalone)
             exit(0);
 
@@ -329,6 +329,7 @@ int main(int argc, char **argv)
     }
     setup_shm();
     setup_signal();
+    // __untracer_setup_global();
     run_persistent(argv[0], argv[1]);
     return 0;
 }

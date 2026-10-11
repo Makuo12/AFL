@@ -15,6 +15,7 @@ add_definitions(${LLVM_DEFINITIONS})
 add_llvm_pass_plugin(Untracer
     ./src/Pass.cc
     ./src/RenameMainPass.cpp
+    ./src/GlobalPass.cpp
 )
 
 set_target_properties(Untracer PROPERTIES

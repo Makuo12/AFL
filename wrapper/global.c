@@ -1,81 +1,61 @@
-#include <string.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <sys/mman.h>
+#include <string.h>
 #include "global.h"
-#ifdef __APPLE__
-#include <mach-o/getsect.h>
-#include <mach-o/dyld.h>
-extern const struct mach_header_64 _mh_execute_header;
-#endif
 
-static void *copy_memory = NULL;
-static uint64_t addr = 0;
-static ssize_t size = 0;
-static unsigned int reset_globals = 0;
+/*
+ * Linux-only global snapshot/restore.
+ *
+ * The CloneGlobalsPass (or a manual __attribute__((section("__cls_glob"))))
+ * places every tracked global in the "__cls_glob" section. Because that name
+ * is a valid C identifier, GNU ld defines __start___cls_glob and
+ * __stop___cls_glob around it. They are weak so the program still links
+ * (and we can report it) when no global ended up in the section.
+ */
+extern char __start___cls_glob[] __attribute__((weak));
+extern char __stop___cls_glob[] __attribute__((weak));
 
-void __untracer_make_writable(uint64_t addr)
-{
-    // align down to page boundary
-    long page_size = sysconf(_SC_PAGESIZE);
-    uint64_t page = addr & ~(page_size - 1);
-    mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
-}
+/*
+ * The runtime's own state lives in a different section so it is never part
+ * of the snapshot. Otherwise a restore would roll back `ready` and
+ * `snapshot` themselves. The pass skips globals that already have a section.
+ */
+#define KEEP __attribute__((section("untracer_state")))
 
-void __untracer_restore_global_sections(char *target, char *source, ssize_t len)
-{
-    __untracer_make_writable((uint64_t)target);
-    memcpy(target, source, len);
-}
+static KEEP char *snapshot = NULL;
+static KEEP size_t snapshot_size = 0;
+static KEEP int ready = 0;
 
-int __untracer_restore_global(void)
-{
-    if (reset_globals != 0 && addr != 0 && size != 0)
-    {
-        __untracer_restore_global_sections((char *)addr, (char *)copy_memory, size);
-        return 0;
-    } else {
-        return -1;
-    }
-}
-
-
+/* Call once, after static initialization (e.g. at the start of main). */
 void __untracer_setup_global(void)
 {
-#ifdef __APPLE__
-    unsigned long section_size;
-    uint8_t *section_addr = getsectiondata(&_mh_execute_header, "__DATA", "__cls_glob", &section_size);
-    if (section_addr == NULL)
+    if (!__start___cls_glob || __start___cls_glob == __stop___cls_glob)
     {
-        fprintf(stderr, "Error: Could not find section __DATA,__cls_glob\n");
+        fprintf(stderr, "Error: section __cls_glob is missing or empty\n");
         return;
     }
-#elif __linux__
-    extern char __start___cls_glob[] __attribute__((weak));
-    extern char __stop___cls_glob[] __attribute__((weak));
 
-    if (__start___cls_glob == NULL || __start___cls_glob == __stop___cls_glob)
-    {
-        fprintf(stderr, "Error: Could not find section .cls_glob\n");
-        return;
-    }
-    uint8_t *section_addr = (uint8_t *)__start___cls_glob;
-    unsigned long section_size = (unsigned long)(__stop___cls_glob - __start___cls_glob);
-#endif
-
-    addr = (unsigned long)section_addr;
-    size = section_size;
-
-    printf("Runtime Address: %p\n", (void *)section_addr);
-    printf("Section Size:    %lu bytes\n", size);
-
-    copy_memory = malloc(size);
-    if (!copy_memory)
+    snapshot_size = (size_t)(__stop___cls_glob - __start___cls_glob);
+    snapshot = malloc(snapshot_size);
+    if (!snapshot)
     {
         perror("malloc");
+        snapshot_size = 0;
         return;
     }
-    memcpy(copy_memory, section_addr, size);
-    reset_globals = 1;
+
+    memcpy(snapshot, __start___cls_glob, snapshot_size);
+    ready = 1;
+}
+
+/* Returns 0 on success, -1 if setup did not succeed. */
+int __untracer_restore_global(void)
+{
+    if (!ready)
+        return -1;
+
+    /* Globals are in a writable data section, so no mprotect is needed. */
+    memcpy(__start___cls_glob, snapshot, snapshot_size);
+    return 0;
 }

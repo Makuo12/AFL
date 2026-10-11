@@ -23,7 +23,7 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                         MPM.addPass(RenameMainPass());
                         // MPM.addPass(HeapResetPass());
                         // MPM.addPass(ExitHookPass());
-                        // MPM.addPass(CloneGlobalsPass());
+                        MPM.addPass(CloneGlobalsPass());
                         // MPM.addPass(FileHookPass());
                         return true;
                     }
