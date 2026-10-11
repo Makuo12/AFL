@@ -1,4 +1,5 @@
 /*
+afl-fuzz.c
   Copyright 2013 Google LLC All rights reserved.
 
   Licensed under the Apache License, Version 2.0 (the "License");
@@ -154,13 +155,16 @@ static s32 forksrv_pid,               /* PID of the fork server           */
 
 EXP_ST u32* trace_bits;                /* SHM with instrumentation bitmap  */
 
-EXP_ST u8  virgin_bits[MAP_SIZE],     /* Regions yet untouched by fuzzing */
-           virgin_tmout[MAP_SIZE],    /* Bits we haven't seen in tmouts   */
-           virgin_crash[MAP_SIZE];    /* Bits we haven't seen in crashes  */
+EXP_ST u32 *virgin_bits,
+    virgin_tmout[MAP_SIZE], /* Bits we haven't seen in tmouts   */
+    virgin_crash[MAP_SIZE]; /* Bits we haven't seen in crashes  */
+
+static u8 *in_bitmap_buf;
 
 static u8  var_bytes[MAP_SIZE];       /* Bytes that appear to be variable */
 
 static s32 shm_id, shm_trap_id;                    /* ID of the SHM region             */
+
 
 static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    clear_screen = 1,  /* Window resized?                  */
@@ -902,6 +906,14 @@ static void mark_as_variable(struct queue_entry* q) {
 
 }
 
+static u32 count_nonzero_u32(const u32 *m)
+{
+  u32 n = 0;
+  for (u32 i = 0; i < MAP_SIZE; i++)
+    if (m[i])
+      n++;
+  return n;
+}
 
 /* Mark / unmark as redundant (edge-only). This is not used for restoring state,
    but may be useful for post-processing datasets. */
@@ -1025,7 +1037,7 @@ EXP_ST void write_bitmap(void) {
 
   if (fd < 0) PFATAL("Unable to open '%s'", fname);
 
-  ck_write(fd, virgin_bits, MAP_SIZE, fname);
+  ck_write(fd, virgin_bits, MAP_SIZE * sizeof(u32), fname);
 
   close(fd);
   ck_free(fname);
@@ -1035,16 +1047,18 @@ EXP_ST void write_bitmap(void) {
 
 /* Read bitmap from file. This is for the -B option again. */
 
-EXP_ST void read_bitmap(u8* fname) {
+EXP_ST void read_bitmap(u8 *fname)
+{
 
   s32 fd = open(fname, O_RDONLY);
 
-  if (fd < 0) PFATAL("Unable to open '%s'", fname);
+  if (fd < 0)
+    PFATAL("Unable to open '%s'", fname);
 
-  ck_read(fd, virgin_bits, MAP_SIZE, fname);
+  in_bitmap_buf = ck_alloc(MAP_SIZE * sizeof(u32));
+  ck_read(fd, in_bitmap_buf, MAP_SIZE * sizeof(u32), fname);
 
   close(fd);
-
 }
 
 void unmodify_oracle(OracleType type, const Trace trace, u8 record_index)
@@ -1136,73 +1150,7 @@ u8 virgin_cnt[MAP_SIZE]; /* highest hit-count bucket seen per index; 0 = none */
 static u8 handle_new_coverage(void)
 {
 
-  u8 ret = 0;
-  u32 n;
-  u32 n_max = trace_bits[0]; /* e.g. 3 */
-  if (n_max > MAP_SIZE)      /* false for any normal run */
-    n_max = MAP_SIZE;
-  /* Pass 1: decide and patch the oracle. Compare against the maps as they
-     were on entry, so processing order doesn't matter. */
-  for (n = 0; n < n_max; n++)
-  {
-    Trace *t = &trap_addr[n];
-
-    if (t->addr <= 0x400000)
-      break; /* end of list */
-
-    if (t->index < 0 || t->index >= MAP_SIZE)
-      FATAL("index out of range: %d", t->index);
-
-    if (t->is_edge_count)
-    {
-
-      if (bucket_of(t->cmp_value) <= virgin_cnt[t->index])
-        continue;
-
-      if (t->cmp_value >= MAX_LOOP)
-      {
-        unmodify_oracle(EDGE_COUNT, *t, 1);
-        overwrite_oracle(*t);
-        DE_INSTRUMENTED = 1;
-      }
-      else
-      {
-        unmodify_oracle(EDGE_COUNT, *t, 0);
-      }
-
-      if (!ret)
-        ret = 1;
-    }
-    else
-    {
-
-      if (virgin_bits[t->index])
-        continue; /* known edge: normal under target_path */
-
-      unmodify_oracle(EDGE, *t, 1);
-      overwrite_oracle(*t);
-      DE_INSTRUMENTED = 1;
-      ret = 2;
-    }
-  }
-
-  /* Pass 2: commit to the maps. */
-  for (u32 i = 0; i < n; i++)
-  {
-
-    Trace *t = &trap_addr[i];
-
-    if (t->is_edge_count)
-    {
-      u8 b = bucket_of(t->cmp_value);
-      if (b > virgin_cnt[t->index])
-        virgin_cnt[t->index] = b;
-    }
-    else
-    {
-      virgin_bits[t->index] = 1;
-    }
-  }
+  u8 ret = trace_bits[0] ? 2 : (trace_bits[3] ? 1 : 0);
 
   if (ret)
     bitmap_changed = 1;
@@ -1395,59 +1343,54 @@ static void cull_queue(void)
 
 /* Configure shared memory and virgin_bits. This is called at startup. */
 
-EXP_ST void setup_shm(void) {
+EXP_ST void setup_shm(void)
+{
 
-  u8* shm_str;
-  u8* shm_id_str;
+  u8 *shm_str;
+  u8 *shm_id_str;
 
-  if (!in_bitmap)
-  {
-    memset(virgin_bits, 0, MAP_SIZE);
-    memset(virgin_cnt, 0, MAP_SIZE);
-  }
+  memset(virgin_tmout, 255, sizeof(virgin_tmout));
+  memset(virgin_crash, 255, sizeof(virgin_crash));
 
-  memset(virgin_tmout, 255, MAP_SIZE);
-  memset(virgin_crash, 255, MAP_SIZE);
+  /* trace_bits: 4 words (see harness record_hit / crash_handler) */
 
-  shm_id = shmget(IPC_PRIVATE, 3 * sizeof(u32), IPC_CREAT | IPC_EXCL | 0600);
-
-  if (shm_id < 0) PFATAL("shmget() failed");
+  shm_id = shmget(IPC_PRIVATE, 4 * sizeof(u32), IPC_CREAT | IPC_EXCL | 0600);
+  if (shm_id < 0)
+    PFATAL("shmget() failed");
 
   atexit(remove_shm);
 
   shm_str = alloc_printf("%d", shm_id);
-
-  /* If somebody is asking us to fuzz instrumented binaries in dumb mode,
-     we don't want them to detect instrumentation, since we won't be sending
-     fork server commands. This should be replaced with better auto-detection
-     later on, perhaps? */
-
-  if (!dumb_mode) setenv(SHM_ENV_VAR, shm_str, 1);
-
+  if (!dumb_mode)
+    setenv(SHM_ENV_VAR, shm_str, 1);
   ck_free(shm_str);
 
-  trace_bits = (uint32_t *)shmat((int)shm_id, NULL, 0);
+  trace_bits = (u32 *)shmat(shm_id, NULL, 0);
+  if (trace_bits == (u32 *)-1)
+    PFATAL("shmat() failed");
 
+  /* virgin_bits: shared with the harness, one u32 per index */
 
-  shm_trap_id = shmget(IPC_PRIVATE, MAP_SIZE * sizeof(Trace), IPC_CREAT | 0600);
-  if (shm_trap_id == -1)
-  {
-    perror("shmget");
-    exit(EXIT_FAILURE);
-  }
+  shm_trap_id = shmget(IPC_PRIVATE, MAP_SIZE * sizeof(u32),
+                       IPC_CREAT | IPC_EXCL | 0600);
+  if (shm_trap_id < 0)
+    PFATAL("shmget() failed");
+
   shm_id_str = alloc_printf("%d", shm_trap_id);
   setenv(SHM_ID, shm_id_str, 1);
-  trap_addr = (Trace *)shmat(shm_trap_id, NULL, 0);
-  if (trap_addr == (Trace *)-1)
-  {
-    perror("shmat");
-    exit(EXIT_FAILURE);
-  }
+  ck_free(shm_id_str);
 
-  if (trace_bits == (u32 *)-1) PFATAL("shmat() failed");
+  virgin_bits = (u32 *)shmat(shm_trap_id, NULL, 0);
+  if (virgin_bits == (u32 *)-1)
+    PFATAL("shmat() failed");
 
+  if (in_bitmap_buf)
+    memcpy(virgin_bits, in_bitmap_buf, MAP_SIZE * sizeof(u32));
+  else
+    memset(virgin_bits, 0, MAP_SIZE * sizeof(u32));
+
+  memset(virgin_cnt, 0, MAP_SIZE);
 }
-
 
 /* Load postprocessor, if available. */
 
@@ -2041,6 +1984,31 @@ static void destroy_extras(void) {
 
 }
 
+/* Reap the harness (dead, or about to be) and close the pipes.
+   Returns the wait status. Safe to call when no harness is running. */
+
+static int reap_harness(int kill_first)
+{
+
+  int st = 0;
+
+  if (forksrv_pid <= 0)
+    return 0;
+
+  if (kill_first)
+    kill(forksrv_pid, SIGKILL);
+
+  if (waitpid(forksrv_pid, &st, 0) <= 0)
+    st = 0;
+
+  close(fsrv_ctl_fd);
+  close(fsrv_st_fd);
+
+  forksrv_pid = 0;
+  child_pid = -1; /* lets handle_timeout() target a new server during init */
+
+  return st;
+}
 
 /* Spin up fork server (instrumented mode only). The idea is explained here:
 
@@ -2050,86 +2018,76 @@ static void destroy_extras(void) {
    cloning a stopped child. So, we just execute once, and then send commands
    through a pipe. The other part of this logic is in afl-as.h. */
 
-EXP_ST void init_forkserver(char** argv) {
+EXP_ST void init_forkserver(char **argv)
+{
 
   static struct itimerval it;
   int st_pipe[2], ctl_pipe[2];
   int status;
   s32 rlen;
 
-  ACTF("Spinning up the fork server...");
+  ACTF("Spinning up the persistent harness...");
 
-  if (pipe(st_pipe) || pipe(ctl_pipe)) PFATAL("pipe() failed");
+  if (pipe(st_pipe) || pipe(ctl_pipe))
+    PFATAL("pipe() failed");
+
+  /* child_pid may be 0 from the previous run; -1 makes handle_timeout()
+     kill the server if the hello never arrives. */
+  child_pid = -1;
 
   forksrv_pid = fork();
 
-  if (forksrv_pid < 0) PFATAL("fork() failed");
+  if (forksrv_pid < 0)
+    PFATAL("fork() failed");
 
-  if (!forksrv_pid) {
+  if (!forksrv_pid)
+  {
 
     struct rlimit r;
 
-    /* Umpf. On OpenBSD, the default fd limit for root users is set to
-       soft 128. Let's try to fix that... */
-
-    if (!getrlimit(RLIMIT_NOFILE, &r) && r.rlim_cur < FORKSRV_FD + 2) {
+    if (!getrlimit(RLIMIT_NOFILE, &r) && r.rlim_cur < FORKSRV_FD + 2)
+    {
 
       r.rlim_cur = FORKSRV_FD + 2;
       setrlimit(RLIMIT_NOFILE, &r); /* Ignore errors */
-
     }
 
-    if (mem_limit) {
+    if (mem_limit)
+    {
 
       r.rlim_max = r.rlim_cur = ((rlim_t)mem_limit) << 20;
 
 #ifdef RLIMIT_AS
-
       setrlimit(RLIMIT_AS, &r); /* Ignore errors */
-
 #else
-
-      /* This takes care of OpenBSD, which doesn't have RLIMIT_AS, but
-         according to reliable sources, RLIMIT_DATA covers anonymous
-         maps - so we should be getting good protection against OOM bugs. */
-
       setrlimit(RLIMIT_DATA, &r); /* Ignore errors */
-
 #endif /* ^RLIMIT_AS */
-
-
     }
 
-    /* Dumping cores is slow and can lead to anomalies if SIGKILL is delivered
-       before the dump is complete. */
-
     r.rlim_max = r.rlim_cur = 0;
-
     setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
-
-    /* Isolate the process and configure standard descriptors. If out_file is
-       specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
 
     setsid();
 
     dup2(dev_null_fd, 1);
     dup2(dev_null_fd, 2);
 
-    if (out_file) {
+    if (out_file)
+    {
 
       dup2(dev_null_fd, 0);
-
-    } else {
+    }
+    else
+    {
 
       dup2(out_fd, 0);
       close(out_fd);
-
     }
 
-    /* Set up control and status pipes, close the unneeded original fds. */
-
-    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0) PFATAL("dup2() failed");
-    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0) PFATAL("dup2() failed");
+    if (dup2(ctl_pipe[0], FORKSRV_FD) < 0)
+      PFATAL("dup2() failed");
+    if (dup2(st_pipe[1], FORKSRV_FD + 1) < 0)
+      PFATAL("dup2() failed");
 
     close(ctl_pipe[0]);
     close(ctl_pipe[1]);
@@ -2141,35 +2099,34 @@ EXP_ST void init_forkserver(char** argv) {
     close(dev_urandom_fd);
     close(fileno(plot_file));
 
-    /* This should improve performance a bit, since it stops the linker from
-       doing extra work post-fork(). */
-
-    if (!getenv("LD_BIND_LAZY")) setenv("LD_BIND_NOW", "1", 0);
-
-    /* Set sane defaults for ASAN if nothing else specified. */
+    if (!getenv("LD_BIND_LAZY"))
+      setenv("LD_BIND_NOW", "1", 0);
 
     setenv("ASAN_OPTIONS", "abort_on_error=1:"
                            "detect_leaks=0:"
                            "symbolize=0:"
-                           "allocator_may_return_null=1", 0);
-
-    /* MSAN is tricky, because it doesn't support abort_on_error=1 at this
-       point. So, we do this in a very hacky way. */
+                           "allocator_may_return_null=1",
+           0);
 
     setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
-                           "symbolize=0:"
-                           "abort_on_error=1:"
-                           "allocator_may_return_null=1:"
-                           "msan_track_origins=0", 0);
+                                                              "symbolize=0:"
+                                                              "abort_on_error=1:"
+                                                              "allocator_may_return_null=1:"
+                                                              "msan_track_origins=0",
+           0);
 
-    execv(target_path, argv);
+    {
+      /* The harness reads its input path from argv[1]. With no @@ / -f it
+         falls back to our stdin (out_fd), which write_to_testcase() rewinds. */
+      char *fs_argv[3] = {(char *)oracle_path,
+                          out_file ? (char *)out_file : "/dev/stdin", NULL};
+      execv(oracle_path, fs_argv);
+    }
 
-    /* Use a distinctive bitmap signature to tell the parent about execv()
-       falling through. */
+    /* execv() fell through: tell the parent via the shared trace_bits. */
 
-    *(u32*)trace_bits = EXEC_FAIL_SIG;
+    *(u32 *)trace_bits = EXEC_FAIL_SIG;
     exit(0);
-
   }
 
   /* Close the unneeded endpoints. */
@@ -2178,9 +2135,9 @@ EXP_ST void init_forkserver(char** argv) {
   close(st_pipe[1]);
 
   fsrv_ctl_fd = ctl_pipe[1];
-  fsrv_st_fd  = st_pipe[0];
+  fsrv_st_fd = st_pipe[0];
 
-  /* Wait for the fork server to come up, but don't wait too long. */
+  /* Wait for the harness hello, but don't wait too long. */
 
   it.it_value.tv_sec = ((exec_tmout * FORK_WAIT_MULT) / 1000);
   it.it_value.tv_usec = ((exec_tmout * FORK_WAIT_MULT) % 1000) * 1000;
@@ -2194,54 +2151,49 @@ EXP_ST void init_forkserver(char** argv) {
 
   setitimer(ITIMER_REAL, &it, NULL);
 
-  /* If we have a four-byte "hello" message from the server, we're all set.
-     Otherwise, try to figure out what went wrong. */
-
-  if (rlen == 4) {
-    OKF("All right - fork server is up.");
+  if (rlen == 4)
+  {
+    OKF("All right - harness is up.");
     return;
   }
 
   if (child_timed_out)
-    FATAL("Timeout while initializing fork server (adjusting -t may help)");
+    FATAL("Timeout while initializing harness (adjusting -t may help)");
 
   if (waitpid(forksrv_pid, &status, 0) <= 0)
     PFATAL("waitpid() failed");
 
-  if (WIFSIGNALED(status)) {
+  if (WIFSIGNALED(status))
+  {
 
-    if (mem_limit && mem_limit < 500 && uses_asan) {
+    if (mem_limit && mem_limit < 500 && uses_asan)
+    {
 
       SAYF("\n" cLRD "[-] " cRST
            "Whoops, the target binary crashed suddenly, before receiving any input\n"
            "    from the fuzzer! Since it seems to be built with ASAN and you have a\n"
            "    restrictive memory limit configured, this is expected; please read\n"
-           "    %s/notes_for_asan.txt for help.\n", doc_path);
-
-    } else if (!mem_limit) {
+           "    %s/notes_for_asan.txt for help.\n",
+           doc_path);
+    }
+    else if (!mem_limit)
+    {
 
       SAYF("\n" cLRD "[-] " cRST
-           "Whoops, the target binary crashed suddenly, before receiving any input\n"
+           "Whoops, the harness crashed suddenly, before receiving any input\n"
            "    from the fuzzer! There are several probable explanations:\n\n"
 
            "    - The binary is just buggy and explodes entirely on its own. If so, you\n"
            "      need to fix the underlying problem or find a better replacement.\n\n"
 
-#ifdef __APPLE__
-
-           "    - On MacOS X, the semantics of fork() syscalls are non-standard and may\n"
-           "      break afl-fuzz performance optimizations when running platform-specific\n"
-           "      targets. To fix this, set AFL_NO_FORKSRV=1 in the environment.\n\n"
-
-#endif /* __APPLE__ */
-
            "    - Less likely, there is a horrible bug in the fuzzer. If other options\n"
            "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
-
-    } else {
+    }
+    else
+    {
 
       SAYF("\n" cLRD "[-] " cRST
-           "Whoops, the target binary crashed suddenly, before receiving any input\n"
+           "Whoops, the harness crashed suddenly, before receiving any input\n"
            "    from the fuzzer! There are several probable explanations:\n\n"
 
            "    - The current memory limit (%s) is too restrictive, causing the\n"
@@ -2261,50 +2213,42 @@ EXP_ST void init_forkserver(char** argv) {
            "    - The binary is just buggy and explodes entirely on its own. If so, you\n"
            "      need to fix the underlying problem or find a better replacement.\n\n"
 
-#ifdef __APPLE__
-
-           "    - On MacOS X, the semantics of fork() syscalls are non-standard and may\n"
-           "      break afl-fuzz performance optimizations when running platform-specific\n"
-           "      targets. To fix this, set AFL_NO_FORKSRV=1 in the environment.\n\n"
-
-#endif /* __APPLE__ */
-
            "    - Less likely, there is a horrible bug in the fuzzer. If other options\n"
            "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n",
            DMS(mem_limit << 20), mem_limit - 1);
-
     }
 
-    FATAL("Fork server crashed with signal %d", WTERMSIG(status));
-
+    FATAL("Harness crashed with signal %d", WTERMSIG(status));
   }
 
-  if (*(u32*)trace_bits == EXEC_FAIL_SIG)
-    FATAL("Unable to execute target application ('%s')", argv[0]);
+  if (*(u32 *)trace_bits == EXEC_FAIL_SIG)
+    FATAL("Unable to execute harness ('%s')", oracle_path);
 
-  if (mem_limit && mem_limit < 500 && uses_asan) {
-
-
-    SAYF("\n" cLRD "[-] " cRST
-           "Hmm, looks like the target binary terminated before we could complete a\n"
-           "    handshake with the injected code. Since it seems to be built with ASAN and\n"
-           "    you have a restrictive memory limit configured, this is expected; please\n"
-           "    read %s/notes_for_asan.txt for help.\n", doc_path);
-
-  } else if (!mem_limit) {
+  if (mem_limit && mem_limit < 500 && uses_asan)
+  {
 
     SAYF("\n" cLRD "[-] " cRST
-         "Hmm, looks like the target binary terminated before we could complete a\n"
-         "    handshake with the injected code. Perhaps there is a horrible bug in the\n"
-         "    fuzzer. Poke <lcamtuf@coredump.cx> for troubleshooting tips.\n");
-
-  } else {
+         "Hmm, looks like the harness terminated before we could complete a\n"
+         "    handshake. Since it seems to be built with ASAN and you have a\n"
+         "    restrictive memory limit configured, this is expected; please\n"
+         "    read %s/notes_for_asan.txt for help.\n",
+         doc_path);
+  }
+  else if (!mem_limit)
+  {
 
     SAYF("\n" cLRD "[-] " cRST
-         "Hmm, looks like the target binary terminated before we could complete a\n"
-         "    handshake with the injected code. There are %s probable explanations:\n\n"
+         "Hmm, looks like the harness terminated before we could complete a\n"
+         "    handshake. Check that setup_shm() succeeded (SHM env vars set)\n"
+         "    and that the harness reaches run_persistent().\n");
+  }
+  else
+  {
 
-         "%s"
+    SAYF("\n" cLRD "[-] " cRST
+         "Hmm, looks like the harness terminated before we could complete a\n"
+         "    handshake. Possible explanations:\n\n"
+
          "    - The current memory limit (%s) is too restrictive, causing an OOM\n"
          "      fault in the dynamic linker. This can be fixed with the -m option. A\n"
          "      simple way to confirm the diagnosis may be:\n\n"
@@ -2315,185 +2259,186 @@ EXP_ST void init_forkserver(char** argv) {
          "      ( ulimit -Sd $[%llu << 10]; /path/to/fuzzed_app )\n\n"
 #endif /* ^RLIMIT_AS */
 
-         "      Tip: you can use http://jwilk.net/software/recidivm to quickly\n"
-         "      estimate the required amount of virtual memory for the binary.\n\n"
-
-         "    - Less likely, there is a horrible bug in the fuzzer. If other options\n"
-         "      fail, poke <lcamtuf@coredump.cx> for troubleshooting tips.\n",
-         getenv(DEFER_ENV_VAR) ? "three" : "two",
-         getenv(DEFER_ENV_VAR) ?
-         "    - You are using deferred forkserver, but __AFL_INIT() is never\n"
-         "      reached before the program terminates.\n\n" : "",
+         "    - The harness exited before run_persistent() (e.g. missing SHM env vars).\n",
          DMS(mem_limit << 20), mem_limit - 1);
-
   }
 
-  FATAL("Fork server handshake failed");
-
+  FATAL("Harness handshake failed");
 }
-
-
 
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
-static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
+static u8 run_target(char **argv, u32 timeout, char *input, int for_oracle)
+{
 
   static struct itimerval it;
   static u32 prev_timed_out = 0;
   static u64 exec_ms = 0;
 
   int status = 0;
+  u8 died = 0; /* harness died during this run */
   u32 tb4;
 
   child_timed_out = 0;
 
+  /* Persistent mode: start the harness lazily (first run, or after it died). */
+
+  if (dumb_mode != 1 && !no_forkserver && forksrv_pid <= 0)
+    init_forkserver(argv);
+
   /* After this memset, trace_bits[] are effectively volatile, so we
      must prevent any earlier operations from venturing into that
-     territory. */
+     territory. virgin_bits is NOT reset: it is the persistent map. */
 
-  // clear_traps(); /* before the run, next to memset(trace_bits) */
-  memset(trace_bits, 0, 3 * sizeof(u32));
+  memset(trace_bits, 0, 4 * sizeof(u32));
   MEM_BARRIER();
 
-  /* If we're running in "dumb" mode, we can't rely on the fork server
-     logic compiled into the target program, so we will just keep calling
-     execve(). There is a bit of code duplication between here and 
-     init_forkserver(), but c'est la vie. */
-
-  if (dumb_mode == 1 || no_forkserver) {
+  if (dumb_mode == 1 || no_forkserver)
+  {
 
     child_pid = fork();
 
-    if (child_pid < 0) PFATAL("fork() failed");
+    if (child_pid < 0)
+      PFATAL("fork() failed");
 
-    if (!child_pid) {
+    if (!child_pid)
+    {
 
       struct rlimit r;
 
-      if (mem_limit) {
+      if (mem_limit)
+      {
 
         r.rlim_max = r.rlim_cur = ((rlim_t)mem_limit) << 20;
 
 #ifdef RLIMIT_AS
-
         setrlimit(RLIMIT_AS, &r); /* Ignore errors */
-
 #else
-
         setrlimit(RLIMIT_DATA, &r); /* Ignore errors */
-
 #endif /* ^RLIMIT_AS */
-
       }
 
       r.rlim_max = r.rlim_cur = 0;
-
       setrlimit(RLIMIT_CORE, &r); /* Ignore errors */
-
-      /* Isolate the process and configure standard descriptors. If out_file is
-         specified, stdin is /dev/null; otherwise, out_fd is cloned instead. */
 
       setsid();
 
       dup2(dev_null_fd, 1);
       dup2(dev_null_fd, 2);
 
-      if (out_file) {
+      if (out_file)
+      {
 
         dup2(dev_null_fd, 0);
-
-      } else {
+      }
+      else
+      {
 
         dup2(out_fd, 0);
         close(out_fd);
-
       }
-
-      /* On Linux, would be faster to use O_CLOEXEC. Maybe TODO. */
 
       close(dev_null_fd);
       close(out_dir_fd);
       close(dev_urandom_fd);
       close(fileno(plot_file));
 
-      /* Set sane defaults for ASAN if nothing else specified. */
-
       setenv("ASAN_OPTIONS", "abort_on_error=1:"
                              "detect_leaks=0:"
                              "symbolize=0:"
-                             "allocator_may_return_null=1", 0);
+                             "allocator_may_return_null=1",
+             0);
 
       setenv("MSAN_OPTIONS", "exit_code=" STRINGIFY(MSAN_ERROR) ":"
-                             "symbolize=0:"
-                             "msan_track_origins=0", 0);
-      char *argv[3] = {oracle_path, input, NULL};
-      execv(oracle_path, argv);
+                                                                "symbolize=0:"
+                                                                "msan_track_origins=0",
+             0);
 
-      /* Use a distinctive bitmap value to tell the parent about execv()
-         falling through. */
+      char *dargv[3] = {oracle_path, input, NULL};
+      execv(oracle_path, dargv);
 
-      *(u32*)trace_bits = EXEC_FAIL_SIG;
+      *(u32 *)trace_bits = EXEC_FAIL_SIG;
       exit(0);
-
     }
-
-  } else {
+  }
+  else
+  {
 
     s32 res;
 
-    /* In non-dumb mode, we have the fork server up and running, so simply
-       tell it to have at it, and then read back PID. */
+    /* Ask the harness for one more iteration. The input file has already been
+       written by write_to_testcase(). If the pipe is broken (harness died
+       between runs), restart it once and retry. */
 
-    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
+    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4)
+    {
 
-      if (stop_soon) return 0;
-      RPFATAL(res, "Unable to request new process from fork server (OOM?)");
+      if (stop_soon)
+        return 0;
 
+      reap_harness(1);
+      init_forkserver(argv);
+      memset(trace_bits, 0, 4 * sizeof(u32));
+      MEM_BARRIER();
+
+      if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4)
+      {
+        if (stop_soon)
+          return 0;
+        RPFATAL(res, "Unable to request new run from harness (OOM?)");
+      }
     }
 
-    if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
+    /* The harness itself is the process that runs (and gets killed on timeout). */
 
-      if (stop_soon) return 0;
-      RPFATAL(res, "Unable to request new process from fork server (OOM?)");
-
-    }
-
-    if (child_pid <= 0) FATAL("Fork server is misbehaving (OOM?)");
-
+    child_pid = forksrv_pid;
   }
 
-  /* Configure timeout, as requested by user, then wait for child to terminate. */
+  /* Configure timeout, as requested by user, then wait for the run to end. */
 
   it.it_value.tv_sec = (timeout / 1000);
   it.it_value.tv_usec = (timeout % 1000) * 1000;
 
   setitimer(ITIMER_REAL, &it, NULL);
 
-  /* The SIGALRM handler simply kills the child_pid and sets child_timed_out. */
+  /* The SIGALRM handler simply kills child_pid and sets child_timed_out. */
 
-  if (dumb_mode == 1 || no_forkserver) {
+  if (dumb_mode == 1 || no_forkserver)
+  {
 
-    if (waitpid(child_pid, &status, 0) <= 0) PFATAL("waitpid() failed");
+    if (waitpid(child_pid, &status, 0) <= 0)
+      PFATAL("waitpid() failed");
+  }
+  else
+  {
 
-  } else {
+    s32 res = read(fsrv_st_fd, &status, 4);
 
-    s32 res;
+    if (res != 4)
+    {
 
-    if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+      if (stop_soon)
+        return 0;
 
-      if (stop_soon) return 0;
-      RPFATAL(res, "Unable to communicate with fork server (OOM?)");
+      /* EOF: the harness died during this run (crash, timeout kill, exit()).
+         Reap it to get the real wait status; the next run restarts it. */
 
+      status = reap_harness(0);
+      died = 1;
     }
-
   }
 
-  if (!WIFSTOPPED(status)) child_pid = 0;
+  /* Dumb mode: child is gone. Persistent mode: it's gone only if it died. */
+
+  if (died || dumb_mode == 1 || no_forkserver)
+    child_pid = 0;
+  else
+    child_pid = -1; /* idle between runs; SIGALRM must not kill it */
 
   getitimer(ITIMER_REAL, &it);
-  exec_ms = (u64) timeout - (it.it_value.tv_sec * 1000 +
-                             it.it_value.tv_usec / 1000);
+  exec_ms = (u64)timeout - (it.it_value.tv_sec * 1000 +
+                            it.it_value.tv_usec / 1000);
 
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 0;
@@ -2502,25 +2447,16 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
 
   total_execs++;
 
-  /* Any subsequent operations on trace_bits must not be moved by the
-     compiler below this point. Past this location, trace_bits[] behave
-     very normally and do not have to be treated as volatile. */
-
   MEM_BARRIER();
 
   tb4 = *(u32 *)trace_bits; /* keep this read first (EXEC_FAIL_SIG) */
-
-#ifdef WORD_SIZE_64
-  // classify_counts((u64*)trace_bits);
-#else
-  // classify_counts((u32*)trace_bits);
-#endif /* ^WORD_SIZE_64 */
 
   prev_timed_out = child_timed_out;
 
   /* Report outcome to caller. */
 
-  if (WIFSIGNALED(status) && !stop_soon) {
+  if (WIFSIGNALED(status) && !stop_soon)
+  {
 
     kill_signal = WTERMSIG(status);
 
@@ -2531,13 +2467,10 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
     }
 
     return FAULT_CRASH;
-
   }
 
-  /* A somewhat nasty hack for MSAN, which doesn't support abort_on_error and
-     must use a special exit code. */
-
-  if (uses_asan && WEXITSTATUS(status) == MSAN_ERROR) {
+  if (uses_asan && WEXITSTATUS(status) == MSAN_ERROR)
+  {
     kill_signal = 0;
     return FAULT_CRASH;
   }
@@ -2545,15 +2478,13 @@ static u8 run_target(char** argv, u32 timeout, char* input, int for_oracle) {
   if ((dumb_mode == 1 || no_forkserver) && tb4 == EXEC_FAIL_SIG)
     return FAULT_ERROR;
 
-  /* It makes sense to account for the slowest units only if the testcase was run
-  under the user defined timeout. */
-  if (!(timeout > exec_tmout) && (slowest_exec_ms < exec_ms)) {
+  if (!(timeout > exec_tmout) && (slowest_exec_ms < exec_ms))
+  {
     slowest_exec_ms = exec_ms;
   }
 
   return FAULT_NONE;
 }
-
 
 /* Write modified data to file for testing. If out_file is set, the old file
    is unlinked and a new one is created. Otherwise, out_fd is rewound and
@@ -4171,7 +4102,7 @@ static void show_stats(void) {
 
   /* Do some bitmap stats. */
 
-  t_bytes = count_bytes(virgin_bits); /* edges seen */
+  t_bytes = count_nonzero_u32(virgin_bits); /* edges seen */
 
   t_byte_ratio = ((double)t_bytes * 100) / MAP_SIZE;
 

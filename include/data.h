@@ -40,4 +40,10 @@ typedef struct
   int32_t cmp_value;
   UT_hash_handle hh;
 } LoopThresholdEntry;
+
+#define LOOP_START_ADD 4
+#define MAX_LOOP 256
+#define BUCKET_INC 32
+#define MULTI_INC 4
+#define BUCKET_SMALL_INC 2
 #endif
