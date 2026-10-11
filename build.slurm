@@ -106,6 +106,16 @@ $BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc $wrap/src/DeEdgeHandler.cc \
 
 $wrap/output/edge "$wrap/output/out.ll" "$wrap/output/main.transformed.ll"
 
+# Fail early if the pass did not tag any globals.
+grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
+    || { echo "ERROR: pass did not tag any globals"; exit 1; }
+
+# Runtime sources are compiled as C (-x c) so the --wrap symbols and the
+# __real_* declarations keep plain C names.
+RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c -x none"
+WRAP_FLAGS="-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
+            -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
+
 echo "Building final binary"
 if [[ "$(uname -s)" == "Darwin" ]]; then
     INCLUDE="-isysroot $(xcrun --show-sdk-path)"
@@ -115,20 +125,34 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
         -o $wrap/output/main.oracle
 elif [[ "$(uname -s)" == "Linux" ]]; then
     if [[ "${1:-}" = arc ]]; then
-        $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include $wrap/output/main.transformed.ll $wrap/wrapper/global.c $wrap/output/fuzzer.bc \
+        $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
+            $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
+            $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     else
-        $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include $wrap/output/main.transformed.ll $wrap/wrapper/global.c $wrap/output/fuzzer.bc \
+        $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
+            $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie \
+            $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     fi
-    touch $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass. 
+    cp  $wrap/output/main.oracle $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass.
 else
     echo "Unknown OS: $(uname -s)"
     exit 1
 fi
 
+echo "Verifying final binary"
+readelf -S $wrap/output/main.oracle | grep -q ' __cls_glob' \
+    || { echo "ERROR: __cls_glob missing from binary"; exit 1; }
+nm $wrap/output/main.oracle | grep -q ' T __untracer_setup_global' \
+    || { echo "ERROR: global runtime not linked"; exit 1; }
+nm $wrap/output/main.oracle | grep -q ' T __wrap_fopen' \
+    || { echo "ERROR: file-handle wrappers not linked"; exit 1; }
+if nm $wrap/output/main.oracle | grep -q ' U __real_'; then
+    echo "ERROR: unresolved __real_* symbols"; exit 1
+fi
 
 echo "Done with build"

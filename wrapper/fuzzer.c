@@ -312,6 +312,7 @@ static void run_persistent(char *argv0, char *input)
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
         __untracer_restore_global();
+        close_open_file_handles(); // new
         if (standalone)
             exit(0);
 
@@ -331,6 +332,7 @@ int main(int argc, char **argv)
     setup_shm();
     setup_signal();
     __untracer_setup_global();
+    __untracer_snapshot_fds();
     run_persistent(argv[0], argv[1]);
     return 0;
 }

@@ -13,6 +13,7 @@ extern "C"
 #endif
     void __untracer_setup_global(void);
     int __untracer_restore_global(void);
+    void __untracer_snapshot_fds(void);
 #ifdef __cplusplus
 }
 #endif
