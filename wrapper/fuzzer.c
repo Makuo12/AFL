@@ -322,30 +322,34 @@ static void run_persistent(char *argv0, char *input)
 
     /* If fd 199 isn't open we're not under afl-fuzz: run once and exit. */
     int standalone = (write(FORKSRV_FD + 1, &msg, 4) != 4);
-
+    char *args[] = {argv0, input, "/dev/null", NULL};
     for (;;)
     {
         if (!standalone)
         {
             uint32_t cmd;
             if (read(FORKSRV_FD, &cmd, 4) != 4)
-                _exit(0); /* afl went away */
+                _exit(0);
+            uint32_t pid = getpid(); /* see point 3 */
+            if (write(FORKSRV_FD + 1, &pid, 4) != 4)
+                _exit(0);
         }
+
         int r = sigsetjmp(env, 1);
         if (r > 0)
+            _exit(0); /* crash path, handle later */
+        if (r == 0)
         {
-            // already goes to crash_handler, so just exit
-            _exit(0);
+            optind = 0;
+            target_main(3, args);
         }
-        char *args[] = {argv0, input, "/dev/null", NULL};
-        optind = 0; /* make getopt in target_main restart */
-        target_main(3, args);
+        /* r == 0: returned normally. r < 0: exitHook fired. Same cleanup. */
         clean_up();
-        
+
         if (standalone)
             exit(0);
 
-        uint32_t status = 0; /* must be 0, see above */
+        uint32_t status = 0;
         if (write(FORKSRV_FD + 1, &status, 4) != 4)
             _exit(0);
     }
