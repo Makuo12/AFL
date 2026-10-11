@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include "uthash.h"
 #include "data.h"
+#include "global.h"
 #include "config.h"
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
@@ -89,11 +90,6 @@ void make_range_writable(uintptr_t start, uintptr_t end)
     }
 }
 
-static inline u8 bucket_of(int32_t cmp)
-{
-    int32_t b = (cmp <= LOOP_START_ADD_5) ? cmp : 4 + cmp / 5;
-    return b > 255 ? 255 : (b < 0 ? 0 : b);
-}
 
 static inline void record_hit(int32_t idx, uint32_t val, int is_loop)
 {

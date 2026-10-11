@@ -1014,12 +1014,6 @@ static void clear_traps(void)
   }
 }
 
-static inline u8 bucket_of(int32_t cmp)
-{
-  int32_t b = (cmp <= LOOP_START_ADD_5) ? cmp : 4 + cmp / 5;
-  return b > 255 ? 255 : (b < 0 ? 0 : b);
-}
-
 /* Write bitmap to file. The bitmap is useful mostly for the secret
    -B option, to focus a separate fuzzing session on a particular
    interesting input without rediscovering all the others. */

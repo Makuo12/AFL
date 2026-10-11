@@ -23,8 +23,7 @@ typedef struct
     int32_t is_edge_count;
 } Trace;
 
-#define LOOP_START_ADD_5 5
-#define MAX_LOOP 255
+#define MAX_LOOP 256
 #define SHM_ID "SHM_ID"
 
 typedef enum
@@ -42,7 +41,6 @@ typedef struct
 } LoopThresholdEntry;
 
 #define LOOP_START_ADD 4
-#define MAX_LOOP 256
 #define BUCKET_INC 32
 #define MULTI_INC 4
 #define BUCKET_SMALL_INC 2
