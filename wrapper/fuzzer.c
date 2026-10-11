@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include "uthash.h"
 #include "data.h"
+#include "global.h"
 #include "config.h"
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
