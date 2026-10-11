@@ -112,20 +112,19 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     $BIN_PATH/clang++  $INCLUDE  \
         $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
         -L/opt/homebrew/opt/fontconfig/lib -lfontconfig \
-        -o $wrap/output/main.trace
-    cp $wrap/output/main.trace $wrap/output/main.oracle
+        -o $wrap/output/main.oracle
 elif [[ "$(uname -s)" == "Linux" ]]; then
     if [[ "${1:-}" = arc ]]; then
         $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include $wrap/output/main.transformed.ll $wrap/wrapper/global.c $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
-            -o $wrap/output/main.trace
+            -o $wrap/output/main.oracle
     else
         $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include $wrap/output/main.transformed.ll $wrap/wrapper/global.c $wrap/output/fuzzer.bc \
             -no-pie \
-            -o $wrap/output/main.trace
+            -o $wrap/output/main.oracle
     fi
-    cp $wrap/output/main.trace $wrap/output/main.oracle
+    touch $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass. 
 else
     echo "Unknown OS: $(uname -s)"
     exit 1
