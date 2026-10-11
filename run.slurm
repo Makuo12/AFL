@@ -15,7 +15,7 @@ set -euo pipefail
 export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 export AFL_SKIP_CPUFREQ=1
 export AFL_NO_UI=1
-export AFL_NO_FORKSRV=1  
+# export AFL_NO_FORKSRV=1  
 export AFL_NO_AFFINITY=1
 
 FUZZ_SECONDS=$((1*60*60))
