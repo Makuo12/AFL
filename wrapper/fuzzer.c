@@ -26,20 +26,19 @@
 /* ------------------------------------------------------------------ */
 /* Prototypes for externally-defined symbols                          */
 /* ------------------------------------------------------------------ */
+    extern void __reset_loop_counters(void);
+    extern int target_main(int argc, char **argv);
 
-extern int target_main(int argc, char **argv);
+    typedef unsigned char u8;
 
-typedef unsigned char u8;
+    uint32_t *virgin_bits;
+    uint32_t *trace_bits;
 
-uint32_t *virgin_bits;
-uint32_t *trace_bits;
-
-
-typedef struct
-{
-    uintptr_t page;
-    UT_hash_handle hh;
-} writable_page;
+    typedef struct
+    {
+        uintptr_t page;
+        UT_hash_handle hh;
+    } writable_page;
 
 writable_page *writable_pages = NULL;
 
@@ -298,7 +297,7 @@ static void run_persistent(char *argv0, char *input)
 
     /* If fd 199 isn't open we're not under afl-fuzz: run once and exit. */
     int standalone = (write(FORKSRV_FD + 1, &msg, 4) != 4);
-
+    char *args[] = {argv0, input, "/dev/null", NULL};
     for (;;)
     {
         if (!standalone)
@@ -308,7 +307,7 @@ static void run_persistent(char *argv0, char *input)
                 _exit(0); /* afl went away */
         }
 
-        char *args[] = {argv0, input, "/dev/null", NULL};
+        __reset_loop_counters();
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
         __untracer_restore_global();
