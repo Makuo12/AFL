@@ -157,6 +157,4 @@ nm $wrap/output/main.oracle | grep -q ' T __untracer_setup_global' \
 nm $wrap/output/main.oracle | grep -q ' T __wrap_fopen' \
     || { echo "ERROR: file-handle wrappers not linked"; exit 1; }
 # malloc must be in the dynamic symbol table, or libc/libstdc++ will keep
-fi
-
 echo "Done with build"
