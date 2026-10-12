@@ -49,6 +49,7 @@ extern const struct mach_header_64 _mh_execute_header;
 
 // extern void __reset_loop_counters(void);
 extern int target_main(int argc, char **argv);
+extern void __reset_loop_counters(void);
 
 extern void __untracer_snapshot_fds(void); /* file-handle tracker */
 extern void close_open_file_handles(void);
@@ -344,7 +345,7 @@ static void run_persistent(char *argv0, char *input)
             if (read(FORKSRV_FD, &cmd, 4) != 4)
                 _exit(0); /* afl went away */
         }
-        // __reset_loop_counters();
+        __reset_loop_counters();
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
 
