@@ -20,9 +20,17 @@
  *   -Wl,--wrap=getline -Wl,--wrap=getdelim
  *
  * Bookkeeping uses __real_malloc/__real_free only, so it never recurses into
- * the wrappers and is never tracked itself (no pause/resume needed). uthash
- * is told to do the same (macros below, before the include). This file must
- * NOT go through CloneGlobalsPass.
+ * the wrappers and is never tracked itself. This file must NOT go through
+ * CloneGlobalsPass. Requires uthash >= 2.0 (BYHASHVALUE macros).
+ *
+ * Speed changes versus the first version:
+ *   1. A permanent sentinel node keeps the hash table alive across
+ *      iterations, so uthash never frees/regrows/rehashes its buckets.
+ *   2. Tracking nodes come from a slab-backed free list instead of one
+ *      __real_malloc/__real_free per tracked block.
+ *   3. Cheap multiply-xorshift hash for pointer keys instead of Jenkins.
+ *   4. The hash is computed once per tracked allocation (find + add share it),
+ *      and free() skips the lookup entirely when nothing is tracked.
  */
 #define KEEP __attribute__((section("untracer_state")))
 
@@ -38,47 +46,102 @@ char *__real_strndup(const char *s, size_t n);
 ssize_t __real_getline(char **lp, size_t *n, FILE *f);
 ssize_t __real_getdelim(char **lp, size_t *n, int d, FILE *f);
 
+/* Cheap hash for pointer keys (keyptr points at the pointer value). */
+#define HASH_FUNCTION(keyptr, keylen, hashv)                         \
+    do                                                               \
+    {                                                                \
+        uint64_t _k = (uint64_t)(uintptr_t)*(void *const *)(keyptr); \
+        _k ^= _k >> 33;                                              \
+        _k *= 0xff51afd7ed558ccdULL;                                 \
+        _k ^= _k >> 33;                                              \
+        (hashv) = (unsigned)_k;                                      \
+    } while (0)
+
 #define uthash_malloc(sz) __real_malloc(sz)
 #define uthash_free(ptr, sz) __real_free(ptr)
 #include "uthash.h"
 
-typedef struct
+typedef struct heap_obj
 {
-    void *p; /* hash key */
+    void *p; /* hash key (reused as the free-list link while pooled) */
     UT_hash_handle hh;
 } heap_obj;
 
 static KEEP heap_obj *heap_map = NULL;
-static KEEP int heap_tracking = 0; /* only track after the baseline point */
+static KEEP int heap_tracking = 0;  /* only track after the baseline point */
+static KEEP size_t heap_live = 0;   /* tracked nodes, excluding the sentinel */
+static KEEP heap_obj heap_sentinel; /* never removed: keeps the table sized */
+static KEEP heap_obj *free_nodes = NULL;
 
-static heap_obj *find_heap(void *p)
+/* ---- node pool ----------------------------------------------------------- */
+
+#define SLAB_NODES 4096
+
+static heap_obj *node_alloc(void)
+{
+    if (!free_nodes)
+    {
+        heap_obj *slab = (heap_obj *)__real_malloc(SLAB_NODES * sizeof(heap_obj));
+        if (!slab)
+            return NULL;
+        /* Slabs are never freed: they are bounded by the per-iteration peak. */
+        for (size_t i = 0; i < SLAB_NODES; i++)
+        {
+            slab[i].p = free_nodes;
+            free_nodes = &slab[i];
+        }
+    }
+    heap_obj *n = free_nodes;
+    free_nodes = (heap_obj *)n->p;
+    return n;
+}
+
+static inline void node_release(heap_obj *n)
+{
+    n->p = free_nodes;
+    free_nodes = n;
+}
+
+/* ---- tracking ------------------------------------------------------------ */
+
+static inline heap_obj *find_heap(void *p)
 {
     heap_obj *s = NULL;
     HASH_FIND_PTR(heap_map, &p, s);
     return s;
 }
 
-static void track_heap(void *p)
+static inline void track_heap(void *p)
 {
-    if (!heap_tracking || p == NULL || find_heap(p) != NULL)
+    if (!heap_tracking || p == NULL)
         return;
 
-    heap_obj *s = (heap_obj *)__real_malloc(sizeof(*s));
-    if (s)
-    {
-        s->p = p;
-        HASH_ADD_PTR(heap_map, p, s); /* bucket table also uses __real_malloc */
-    }
+    unsigned hv;
+    heap_obj *s = NULL;
+    HASH_VALUE(&p, sizeof(void *), hv); /* hash once, reuse for find + add */
+    HASH_FIND_BYHASHVALUE(hh, heap_map, &p, sizeof(void *), hv, s);
+    if (s) /* stale entry for a reused address: already tracked */
+        return;
+
+    s = node_alloc();
+    if (!s)
+        return;
+    s->p = p;
+    HASH_ADD_KEYPTR_BYHASHVALUE(hh, heap_map, &s->p, sizeof(void *), hv, s);
+    heap_live++;
 }
 
-static void drop_node(heap_obj *s)
+static inline void drop_node(heap_obj *s)
 {
     HASH_DEL(heap_map, s);
-    __real_free(s);
+    node_release(s);
+    heap_live--;
 }
 
-static int untrack_heap(void *p)
+static inline int untrack_heap(void *p)
 {
+    if (!heap_live)
+        return 0;
     heap_obj *s = find_heap(p);
     if (!s)
         return 0;
@@ -157,7 +220,13 @@ void __wrap_free(void *p)
 {
     if (p == NULL)
         return;
-    untrack_heap(p);
+    /* Nothing tracked (or tracking not started): skip the hash lookup. */
+    if (heap_live)
+    {
+        heap_obj *s = find_heap(p);
+        if (s)
+            drop_node(s);
+    }
     __real_free(p);
 }
 
@@ -170,7 +239,7 @@ void *__wrap_realloc(void *p, size_t n)
         return r;
     }
 
-    heap_obj *old = find_heap(p); /* NULL => block predates the baseline */
+    heap_obj *old = heap_live ? find_heap(p) : NULL; /* NULL => predates baseline */
     void *r = __real_realloc(p, n);
 
     if (r == NULL)
@@ -230,6 +299,12 @@ ssize_t __wrap_getline(char **lp, size_t *n, FILE *f)
  * Everything allocated before this point is baseline and is never freed. */
 void __untracer_heap_start(void)
 {
+    if (!heap_map)
+    {
+        /* Permanent entry so the table is never torn down by HASH_DEL. */
+        heap_sentinel.p = (void *)1; /* never a real malloc result */
+        HASH_ADD_PTR(heap_map, p, &heap_sentinel);
+    }
     heap_tracking = 1;
 }
 
@@ -240,8 +315,11 @@ void free_open_heap(void)
     heap_obj *s, *tmp;
     HASH_ITER(hh, heap_map, s, tmp)
     {
+        if (s == &heap_sentinel)
+            continue;
         HASH_DEL(heap_map, s);
         __real_free(s->p);
-        __real_free(s);
+        node_release(s);
     }
+    heap_live = 0;
 }

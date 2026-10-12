@@ -18,8 +18,6 @@
  * would register them with the heap tracker, which frees them on reset and
  * leaves writable_pages dangling. These macros must precede the first
  * #include of uthash.h. */
-void *__real_malloc(size_t n);
-void __real_free(void *p);
 #define uthash_malloc(sz) __real_malloc(sz)
 #define uthash_free(ptr, sz) __real_free(ptr)
 #include "uthash.h"
