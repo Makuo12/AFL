@@ -30,7 +30,7 @@ fi
 echo "Building afl_fuzz"
 AFL_NO_X86=1 make -C $wrap/fuzzer afl-fuzz
 
-PERF_FLAGS="-O3 -funroll-loops -g -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden -fno-pie -fno-plt -fcf-protection=none"
+PERF_FLAGS="-O3 -funroll-loops -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden -fno-pie -fno-plt -fcf-protection=none"
 
 LIB_PATH="$(llvm-config --libdir)"
 BIN_PATH="$(llvm-config --bindir)"
