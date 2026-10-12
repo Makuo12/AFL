@@ -1328,6 +1328,8 @@ static void cull_queue(void)
       arr[n++] = q;
   }
 
+  /* Pass 1: the fastest / smallest FAVORED_PERCENT of the queue. */
+
   if (n)
   {
 
@@ -1344,6 +1346,23 @@ static void cull_queue(void)
       queued_favored++;
       if (!arr[i]->was_fuzzed)
         pending_favored++;
+    }
+  }
+
+  /* Pass 2: any entry that found a new edge and has never been fuzzed
+     is favored regardless of speed, so a deep, slow find gets at least
+     one full pass before it can be deprioritized. Seeds (depth 1) are
+     excluded; they are already in the queue by definition. */
+
+  for (i = 0; i < n; i++)
+  {
+    q = arr[i];
+
+    if (!q->favored && q->has_new_cov && !q->was_fuzzed && q->depth >= 2)
+    {
+      q->favored = 1;
+      queued_favored++;
+      pending_favored++;
     }
   }
 
@@ -5352,32 +5371,31 @@ static u8 fuzz_one(char **argv)
 
 #else
 
-  // if (pending_favored) {
+  if (pending_favored)
+  {
+    /* Favored, never-fuzzed arrivals exist: skip already-fuzzed or
+       non-favored entries to reach them sooner. */
 
-  //   /* If we have any favored, non-fuzzed new arrivals in the queue,
-  //      possibly skip to them at the expense of already-fuzzed or non-favored
-  //      cases. */
+    if ((queue_cur->was_fuzzed || !queue_cur->favored) &&
+        UR(100) < SKIP_TO_NEW_PROB)
+      return 1;
+  }
+  else if (!dumb_mode && !queue_cur->favored && queued_paths > 10)
+  {
+    /* Otherwise still skip some non-favored entries, more often for
+       already-fuzzed ones than for never-fuzzed ones. */
 
-  //   if ((queue_cur->was_fuzzed || !queue_cur->favored) &&
-  //       UR(100) < SKIP_TO_NEW_PROB) return 1;
-
-  // } else if (!dumb_mode && !queue_cur->favored && queued_paths > 10) {
-
-  //   /* Otherwise, still possibly skip non-favored cases, albeit less often.
-  //      The odds of skipping stuff are higher for already-fuzzed inputs and
-  //      lower for never-fuzzed entries. */
-
-  //   if (queue_cycle > 1 && !queue_cur->was_fuzzed) {
-
-  //     if (UR(100) < SKIP_NFAV_NEW_PROB) return 1;
-
-  //   } else {
-
-  //     if (UR(100) < SKIP_NFAV_OLD_PROB) return 1;
-
-  //   }
-
-  // }
+    if (queue_cycle > 1 && !queue_cur->was_fuzzed)
+    {
+      if (UR(100) < SKIP_NFAV_NEW_PROB)
+        return 1;
+    }
+    else
+    {
+      if (UR(100) < SKIP_NFAV_OLD_PROB)
+        return 1;
+    }
+  }
 
 #endif /* ^IGNORE_FINDS */
 
@@ -6559,14 +6577,12 @@ havoc_stage:
 
   if (!splice_cycle)
   {
-
     stage_name = "havoc";
     stage_short = "havoc";
-    stage_max = 1000;
+    stage_max = (HAVOC_BASE_CYCLES * perf_score / havoc_div) / 100;
   }
   else
   {
-
     static u8 tmp[32];
 
     perf_score = orig_perf;
@@ -6574,8 +6590,15 @@ havoc_stage:
     sprintf(tmp, "splice %u", splice_cycle);
     stage_name = tmp;
     stage_short = "splice";
-    stage_max = 1000;
+    stage_max = (SPLICE_BASE_CYCLES * perf_score / havoc_div) / 100;
   }
+
+  /* Non-favored entries that survived the skip check get a lighter pass. */
+  if (!queue_cur->favored)
+    stage_max /= 2;
+
+  if (stage_max > HAVOC_MAX_STAGE)
+    stage_max = HAVOC_MAX_STAGE;
 
   if (stage_max < HAVOC_MIN)
     stage_max = HAVOC_MIN;
@@ -7009,11 +7032,14 @@ havoc_stage:
 
     if (queued_paths != havoc_queued)
     {
+      if (perf_score <= HAVOC_MAX_MULT * 100)
+      {
+        stage_max *= 2;
+        perf_score *= 2;
+      }
 
-      // if (perf_score <= HAVOC_MAX_MULT * 100) {
-      //   stage_max  *= 2;
-      //   perf_score *= 2;
-      // }
+      if (stage_max > HAVOC_MAX_STAGE)
+        stage_max = HAVOC_MAX_STAGE;
 
       havoc_queued = queued_paths;
     }
@@ -7089,6 +7115,7 @@ retry_splicing:
       target = target->next;
       splicing_with++;
     }
+
 
     if (!target)
       goto retry_splicing;

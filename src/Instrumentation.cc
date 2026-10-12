@@ -2,6 +2,7 @@
 #include "PCTablePass.h"
 #include "Edge.h"
 #include <fstream>
+#include "llvm/ADT/StringSet.h"
 #include <map>
 
 using namespace llvm;
@@ -14,14 +15,10 @@ std::vector<std::string> skipFunctions = {
     "__runtime",
     "pctable",
     "PCTableEntry",
-    "__untracer", // also covers __untracer_make_writable, __untracer_restore_global(_sections),
-                  // __untracer_setup_global
+    "__untracer", // covers __untracer_heap_start, _setup_global, _restore_global(_sections),
+                  // _make_writable, _snapshot_fds, etc.
 
     // libc / system
-    "malloc",
-    "realloc",
-    "calloc",
-    "free",
     "sysconf",
     "sscanf",
     "mprotect",
@@ -32,6 +29,52 @@ std::vector<std::string> skipFunctions = {
     "sigemptyset",
     "sigaction",
     "sizeof",
+
+    // all linker-wrapped symbols (covers __wrap_* and __real_* for every function)
+    "__wrap_",
+    "__real_",
+
+    // C allocation family
+    "malloc", // also malloc_usable_size, __libc_malloc
+    "calloc",
+    "realloc", // also reallocarray
+    "free",
+    "cfree",
+    "memalign",
+    "aligned_alloc",
+    "posix_memalign",
+    "valloc",
+    "pvalloc",
+    "mallopt",
+    "strdup",
+    "strndup",
+    "wcsdup",
+    "getline",
+    "getdelim",
+    "asprintf", // also vasprintf
+    "realpath",
+    "open_memstream",
+    "fmemopen",
+    "setvbuf",
+    "mmap",
+    "munmap",
+    "mremap",
+    "brk",
+    "sbrk",
+    "alloca",
+
+    // C++ allocation (mangled names, substring match covers all overloads)
+    "_Znwm",        // operator new(size_t) + nothrow + align_val_t variants
+    "_Znam",        // operator new[]
+    "_ZdlPv",       // operator delete (+ sized, nothrow, aligned)
+    "_ZdaPv",       // operator delete[] (+ sized, nothrow, aligned)
+    "operator new", // demangled form, in case names are demangled
+    "operator delete",
+    "__cxa_allocate_exception",
+    "__cxa_free_exception",
+    "__cxa_allocate_dependent_exception",
+    "__cxa_free_dependent_exception",
+    "new_allocator", // libstdc++ std::allocator internals
 
     // uthash
     "HASH_FIND",
@@ -48,7 +91,7 @@ std::vector<std::string> skipFunctions = {
     "fclose_hook",
     "close_open_file_handles",
 
-    // heap-pointer tracking
+    // heap tracking: old implementation
     "ptr_obj",
     "add_ptr",
     "find_ptr",
@@ -59,6 +102,45 @@ std::vector<std::string> skipFunctions = {
     "myFree",
     "free_ptrs",
 
+    // heap tracking: new open-addressing table
+    "hash_ptr",
+    "tab_find",
+    "tab_erase",
+    "tab_grow",
+    "track_heap",
+    "untrack_heap",
+    "line_common",
+    "free_open_heap",
+    "__untracer_heap_start",
+
+    "__cxa_",            // covers __cxa_throw, __cxa_rethrow, __cxa_begin_catch,
+                         // __cxa_end_catch, __cxa_allocate_exception,
+                         // __cxa_free_exception, __cxa_get_exception_ptr,
+                         // __cxa_call_unexpected, __cxa_bad_cast, __cxa_bad_typeid,
+                         // __cxa_atexit, __cxa_guard_*, __cxa_pure_virtual, ...
+    "_Unwind_",          // _Unwind_Resume, _Unwind_RaiseException, _Unwind_DeleteException, ...
+    "__gxx_personality", // __gxx_personality_v0, __gxx_personality_sj0
+    "__gcc_personality",
+    "__clang_call_terminate",   // emitted by clang for noexcept / cleanup-failure paths
+    "_ZSt9terminatev",          // std::terminate (mangled)
+    "_ZSt10unexpectedv",        // std::unexpected
+    "_ZSt13set_terminatePFvvE", // std::set_terminate
+    "std::terminate",           // demangled forms, in case names are demangled
+    "std::unexpected",
+    "__cxa_throw", // explicit, in case you later narrow "__cxa_" down
+    "__cxa_begin_catch",
+    "__cxa_end_catch",
+    "__cxa_rethrow",
+    "llvm.eh", // llvm.eh.typeid.for, llvm.eh.sjlj.*, etc.
+    "_ZTI",    // typeinfo objects (std::type_info for catch matching)
+    "_ZTS",    // typeinfo name strings
+
+    // C-style non-local jumps (the C equivalent of try/catch)
+    "setjmp",  // also _setjmp, __sigsetjmp, sigsetjmp
+    "longjmp", // also _longjmp, siglongjmp
+    "__builtin_setjmp",
+    "__builtin_longjmp",
+
     // global-section restore
     "__untracer_make_writable",
     "__untracer_restore_global_sections",
@@ -68,15 +150,17 @@ std::vector<std::string> skipFunctions = {
     "main"
 };
 
+static const StringSet<> exactSkip = {"main", "free", "malloc", "calloc", "realloc", "brk", "sbrk",
+                                      "mmap", "munmap", "mremap", "alloca", "strdup", "strndup",
+                                      "getline", "getdelim", "realpath", "setvbuf"};
+
 bool foundInSkipFunctions(StringRef fName)
 {
-    for (auto func : skipFunctions)
-    {
+    if (exactSkip.contains(fName))
+        return true;
+    for (const auto &func : skipFunctions)
         if (fName.contains(func))
-        {
             return true;
-        }
-    }
     return false;
 }
 

@@ -44,4 +44,8 @@ typedef struct
 #define BUCKET_INC 32
 #define MULTI_INC 4
 #define BUCKET_SMALL_INC 2
+
+#define HAVOC_BASE_CYCLES 500  /* havoc execs at perf_score == 100  */
+#define SPLICE_BASE_CYCLES 250 /* splice execs at perf_score == 100 */
+#define HAVOC_MAX_STAGE 4000   /* hard cap per stage */
 #endif
