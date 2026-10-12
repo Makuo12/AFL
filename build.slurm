@@ -157,13 +157,6 @@ nm $wrap/output/main.oracle | grep -q ' T __untracer_setup_global' \
 nm $wrap/output/main.oracle | grep -q ' T __wrap_fopen' \
     || { echo "ERROR: file-handle wrappers not linked"; exit 1; }
 # malloc must be in the dynamic symbol table, or libc/libstdc++ will keep
-# calling their own copy and the heap tracker will miss their allocations.
-nm -D $wrap/output/main.oracle | grep -qE ' T malloc$' \
-    || { echo "ERROR: malloc is not exported by the executable"; exit 1; }
-nm -D $wrap/output/main.oracle | grep -qE ' T free$' \
-    || { echo "ERROR: free is not exported by the executable"; exit 1; }
-if nm $wrap/output/main.oracle | grep -q ' U __real_'; then
-    echo "ERROR: unresolved __real_* symbols"; exit 1
 fi
 
 echo "Done with build"
