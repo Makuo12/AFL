@@ -3,8 +3,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "global.h" /* also declares __real_malloc / __real_free */
+
+/* The tracking nodes must come from the real allocator. With --wrap=malloc
+ * active, plain malloc() would register them with the heap tracker, which
+ * would then free them again on reset (double free). These macros must come
+ * before the first #include of uthash.h. */
+#define uthash_malloc(sz) __real_malloc(sz)
+#define uthash_free(ptr, sz) __real_free(ptr)
 #include "uthash.h"
-#include "global.h"
 
 /*
  * Tracks every FILE* the target opens (fopen, fopen64, freopen, fdopen,
@@ -15,6 +22,11 @@
  * Link with:
  *   -Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen
  *   -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose
+ *
+ * Reset order per iteration (see harness):
+ *   close_open_file_handles(); free_open_heap(); __untracer_restore_global();
+ * Streams must be closed before the heap is freed, because a stream may be
+ * using a heap buffer (setvbuf).
  *
  * This file must NOT go through CloneGlobalsPass: its state has to survive the
  * global restore, so it lives in its own section as well.
@@ -63,15 +75,15 @@ static void track(FILE *f, int is_pipe)
     if (f == NULL || is_std_stream(f) || find_file_ptr(f) != NULL)
         return;
 
-    __untracer_heap_pause();
-    file_ptr_obj *s = (file_ptr_obj *)malloc(sizeof(*s));
+    /* __real_malloc (via the uthash macros too): never seen by the heap
+     * tracker, so no pause/resume is needed. */
+    file_ptr_obj *s = (file_ptr_obj *)__real_malloc(sizeof(*s));
     if (s)
     {
         s->f = f;
         s->is_pipe = is_pipe;
-        HASH_ADD_PTR(file_ptr_map, f, s); // must be inside: allocates/grows the bucket table
+        HASH_ADD_PTR(file_ptr_map, f, s);
     }
-    __untracer_heap_resume();
 }
 
 static void untrack(FILE *f)
@@ -80,7 +92,7 @@ static void untrack(FILE *f)
     if (s)
     {
         HASH_DEL(file_ptr_map, s);
-        free(s);
+        __real_free(s);
     }
 }
 
@@ -203,7 +215,7 @@ void __untracer_snapshot_fds(void)
     baseline_taken = 1;
 }
 
-/* Call before __untracer_restore_global(). */
+/* Call before free_open_heap() and __untracer_restore_global(). */
 void close_open_file_handles(void)
 {
     /* 1. Close tracked streams so stdio frees its buffers and the fds. */
@@ -215,7 +227,7 @@ void close_open_file_handles(void)
             __real_pclose(s->f);
         else
             __real_fclose(s->f);
-        free(s);
+        __real_free(s);
     }
 
     /* 2. Close any other fd that was not open when the baseline was taken. */

@@ -2480,6 +2480,41 @@ static u8 run_target(char **argv, u32 timeout, char *input, int for_oracle)
   return FAULT_NONE;
 }
 
+void remove_instrumentation()
+{
+  char *stage1[] = {p->remove_edge_bin, "-i", p->transformed_ll,
+                    "-m", p->meta_data, "-o", p->transformed_ll,
+                    "-l", p->loop_thresholds, NULL};
+
+  if (BASE_ADDRESS == 0)
+  {
+    fprintf(stderr, "BASE_ADDRESS not set — refusing to re-link with linker default\n");
+    exit(EXIT_FAILURE);
+  }
+
+  char image_base_arg[64];
+  snprintf(image_base_arg, sizeof(image_base_arg), "-Wl,--image-base=0x%lx",
+           (unsigned long)BASE_ADDRESS);
+
+  char *stage2[] = {"clang++",
+                    // same as FINAL_FLAGS in build.sh
+                    "-O3", "-g", "-fno-stack-protector", "-fomit-frame-pointer",
+                    "-Xclang", "-disable-llvm-passes",
+                    p->transformed_ll, p->wrapper_bc,
+                    "-no-pie", "-fuse-ld=bfd",
+                    image_base_arg, "-Wl,-z,noseparate-code",
+                    "-o", p->main_bin, NULL};
+
+  if (run(stage1) != 0 || run(stage2) != 0)
+  {
+    fprintf(stderr, "de-instrumentation failed\n");
+    exit(EXIT_FAILURE); // atexit cleans up shm in the parent
+  }
+  FILE *f = fopen(p->meta_data, "w");
+  if (f)
+    fclose(f);
+}
+
 /* Write modified data to file for testing. If out_file is set, the old file
    is unlinked and a new one is created. Otherwise, out_fd is rewound and
    truncated. */

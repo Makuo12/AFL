@@ -6,6 +6,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <errno.h>
+#include "global.h"
 
 /*
  * Tracks heap blocks allocated during one persistent iteration and frees
