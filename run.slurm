@@ -22,7 +22,7 @@ export AFL_DISABLE_TRIM=1
 export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
 export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
-FUZZ_SECONDS=$((24*60*60))
+FUZZ_SECONDS=$((23*60*60))
 TRACE="main.trace"
 ORACLE="main.oracle"
 PROGRAM="project_afl"
