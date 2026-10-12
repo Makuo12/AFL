@@ -18,18 +18,22 @@ void instrumentBlocks(Function &F, SmallPtrSet<BasicBlock *, 16> &seen, int &pct
         if (&BB == &F.getEntryBlock())
             continue;
 
+        // The id must fit in 16 bits (0..65535); otherwise stop instrumenting.
+        if (pctableCount > 0xFFFF)
+            return;
+
         Instruction *InsertPt = &*BB.getFirstInsertionPt();
         IRBuilder<> IRB(InsertPt);
 
         int id = pctableCount++;
-        uint32_t uid = static_cast<uint32_t>(id);
-        unsigned b0 = uid & 0xFF, b1 = (uid >> 8) & 0xFF,
-                 b2 = (uid >> 16) & 0xFF, b3 = (uid >> 24) & 0xFF;
+        uint16_t uid = static_cast<uint16_t>(id);
+        unsigned b0 = uid & 0xFF;
+        unsigned b1 = (uid >> 8) & 0xFF;
 
+        // Layout: 0xCC | id low byte | id high byte
         std::string AsmStr =
             ".byte 0xcc\n\t.byte " +
-            std::to_string(b0) + ", " + std::to_string(b1) + ", " +
-            std::to_string(b2) + ", " + std::to_string(b3) + "\n\t";
+            std::to_string(b0) + ", " + std::to_string(b1) + "\n\t";
         FunctionType *AsmFTy = FunctionType::get(Type::getVoidTy(Ctx), false);
         InlineAsm *IA = InlineAsm::get(AsmFTy, AsmStr, "~{memory}", true);
         CallInst *TrapCall = IRB.CreateCall(IA);

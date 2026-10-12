@@ -157,6 +157,10 @@ void insertCounterGuard(BasicBlock *HeaderBB, GlobalVariable *CounterArr,
     if (!isInstrumentable(HeaderBB))
         return;
 
+    // The id must fit in 16 bits (0..65535); otherwise stop instrumenting.
+    if (count > 0xFFFF)
+        return;
+
     Instruction *InsertPt = &*HeaderBB->getFirstInsertionPt();
     IRBuilder<> Builder(InsertPt);
 
@@ -167,17 +171,17 @@ void insertCounterGuard(BasicBlock *HeaderBB, GlobalVariable *CounterArr,
 
     int id = count++;
 
-    // Encode id as 4 little-endian bytes so the runtime can memcpy an
-    // int32_t straight back out (x86 native byte order).
-    uint32_t uid = static_cast<uint32_t>(id);
+    // Encode id as 2 little-endian bytes so the runtime can memcpy a
+    // uint16_t straight back out (x86 native byte order).
+    uint16_t uid = static_cast<uint16_t>(id);
     unsigned b0 = uid & 0xFF;
     unsigned b1 = (uid >> 8) & 0xFF;
-    unsigned b2 = (uid >> 16) & 0xFF;
-    unsigned b3 = (uid >> 24) & 0xFF;
 
     // $0 = address of this loop's counter slot, passed in a GPR.
     // ".byte 0x3d,0x01,0x00,0x00,0x00" == "cmp eax, 1" forced to imm32
     // (5 bytes) rather than the compact form the assembler would pick.
+    //
+    // Trap payload layout: 0xCC | 0x90 0x90 0x90 0x90 | id_lo | id_hi
     std::string AsmStr =
         "movl ($0), %eax\n\t"
         ".byte 0x3d, 0x01, 0x00, 0x00, 0x00\n\t"
@@ -185,8 +189,7 @@ void insertCounterGuard(BasicBlock *HeaderBB, GlobalVariable *CounterArr,
         ".byte 0xcc\n\t"                   // trap byte
         ".byte 0x90, 0x90, 0x90, 0x90\n\t" // marker: loop vs edge
         ".byte " +
-        std::to_string(b0) + ", " + std::to_string(b1) + ", " +
-        std::to_string(b2) + ", " + std::to_string(b3) + "\n\t" +
+        std::to_string(b0) + ", " + std::to_string(b1) + "\n\t" +
         "1:\n\t"
         "addl $$1, %eax\n\t"
         "movl %eax, ($0)\n\t";

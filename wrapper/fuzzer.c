@@ -184,15 +184,23 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         return;
     }
 
-    make_range_writable(addr - 7, addr + 9);
+    make_range_writable(addr - 7, addr + 6);
 
     uintptr_t resume_addr = 0;
     unsigned char *trap = (unsigned char *)addr;
-    int32_t value = 0, new_value = 0, index_block = 0;
+    int32_t value = 0, new_value = 0;
+    uint16_t index_block = 0;
     int32_t bucket_value = 0;
-    // Loop-counter layout:  0xcc 0x90 0x90 0x90 0x90 id0 id1 id2 id3   (9 bytes)
-    // Edge-counter layout:  0xcc id0 id1 id2 id3                       (5 bytes)
-    if (*trap == 0xcc && trap[1] == 0x90 && trap[2] == 0x90 && trap[3] == 0x90 && trap[4] == 0x90)
+    // Loop-counter layout:  0xcc 0x90 0x90 0x90 0x90 id_lo id_hi   (7 bytes)
+    // Edge-counter layout:  0xcc id_lo id_hi                       (3 bytes)
+    //
+    // Loop sites are also identified by the cmp opcode (0x3d) 7 bytes
+    // before the trap and the "jle 1f" opcode (0x7e) 2 bytes before it.
+    // With 16-bit ids, an edge trap with id 0x9090 followed by padding
+    // NOPs would otherwise look exactly like a loop marker.
+    if (*trap == 0xcc && trap[1] == 0x90 && trap[2] == 0x90 &&
+        trap[3] == 0x90 && trap[4] == 0x90 &&
+        *(trap - 7) == 0x3d && *(trap - 2) == 0x7e)
     {
         uintptr_t cmp_addr = addr - 7;
         uintptr_t num_addr = cmp_addr + 1;
@@ -207,8 +215,8 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         memcpy(&index_block, (void *)(addr + 5), sizeof(index_block));
         if (new_value >= MAX_LOOP)
         {
-            memset(trap, 0x90, 9);
-            resume_addr = addr + 9;
+            memset(trap, 0x90, 7);
+            resume_addr = addr + 7;
         }
         else
         {
@@ -227,8 +235,8 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
     else if (*trap == 0xcc)
     {
         memcpy(&index_block, (void *)(addr + 1), sizeof(index_block));
-        memset(trap, 0x90, 5);
-        resume_addr = addr + 5;
+        memset(trap, 0x90, 3);
+        resume_addr = addr + 3;
         record_hit(index_block, 1, 0);
     }
     else

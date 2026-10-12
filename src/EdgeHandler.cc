@@ -221,6 +221,12 @@ void handleDefaultBlockEdge(Instruction &TI, int &defaultAddedCount, SmallPtrSet
     auto *SI = dyn_cast<SwitchInst>(&TI);
     if (!SI)
         return;
+
+    // The id must fit in 16 bits (0..65535); otherwise stop instrumenting.
+    // Checked before anything is modified so no IR is left half-built.
+    if (defaultAddedCount > 0xFFFF)
+        return;
+
     LLVMContext &Ctx = SI->getContext();
     Function *F = SI->getFunction();
     Type *Int32Ty = Type::getInt32Ty(Ctx);
@@ -231,22 +237,17 @@ void handleDefaultBlockEdge(Instruction &TI, int &defaultAddedCount, SmallPtrSet
     SI->setDefaultDest(NewDefaultBB);
     IRBuilder<> Builder(NewDefaultBB);
 
-    // Encode id as 4 little-endian raw bytes placed right after the
-    // 0xcc trap byte — same convention as the other edge-instrumentation
-    // sites (else-edge, invoke, switch-fallthrough). The runtime reads
-    // these directly off the SIGTRAP return address instead of decoding
-    // any instruction, so the offset (trap+1) is fixed regardless of
-    // codegen.
-    uint32_t uid = static_cast<uint32_t>(id);
+    // Encode id as 2 little-endian raw bytes placed right after the
+    // 0xcc trap byte (CC | id_lo | id_hi). The runtime reads these
+    // directly off the SIGTRAP return address instead of decoding any
+    // instruction, so the offset (trap+1) is fixed regardless of codegen.
+    uint16_t uid = static_cast<uint16_t>(id);
     unsigned b0 = uid & 0xFF;
     unsigned b1 = (uid >> 8) & 0xFF;
-    unsigned b2 = (uid >> 16) & 0xFF;
-    unsigned b3 = (uid >> 24) & 0xFF;
     std::string AsmStr =
         ".byte 0xcc\n\t"
         ".byte " +
-        std::to_string(b0) + ", " + std::to_string(b1) + ", " +
-        std::to_string(b2) + ", " + std::to_string(b3) + "\n\t";
+        std::to_string(b0) + ", " + std::to_string(b1) + "\n\t";
     FunctionType *AsmFTy =
         FunctionType::get(Type::getVoidTy(Ctx), /*isVarArg=*/false);
     InlineAsm *IA = InlineAsm::get(
@@ -289,24 +290,26 @@ void handleInvokeEdges(Instruction &TI, int &invokeAddedCount, SmallPtrSet<Basic
         if (i != 0)
             continue;
         BasicBlock *NormalDest = EdgeBB;
+
+        // The id must fit in 16 bits (0..65535); otherwise stop instrumenting.
+        if (invokeAddedCount > 0xFFFF)
+            return;
+
         int id = invokeAddedCount++;
         MDNode *MD = MDNode::get(Ctx, ConstantAsMetadata::get(ConstantInt::get(Int32Ty, id)));
 
-        // Encode id as 4 little-endian raw bytes placed right after the
-        // 0xcc trap byte — same convention as the else-edge and loop
-        // guard sites. The runtime reads these directly off the
-        // SIGTRAP return address instead of decoding any instruction,
-        // so the offset (trap+1) is fixed regardless of codegen.
-        uint32_t uid = static_cast<uint32_t>(id);
+        // Encode id as 2 little-endian raw bytes placed right after the
+        // 0xcc trap byte (CC | id_lo | id_hi) — same convention as the
+        // else-edge and loop guard sites. The runtime reads these directly
+        // off the SIGTRAP return address instead of decoding any
+        // instruction, so the offset (trap+1) is fixed regardless of codegen.
+        uint16_t uid = static_cast<uint16_t>(id);
         unsigned b0 = uid & 0xFF;
         unsigned b1 = (uid >> 8) & 0xFF;
-        unsigned b2 = (uid >> 16) & 0xFF;
-        unsigned b3 = (uid >> 24) & 0xFF;
         std::string AsmStr =
             ".byte 0xcc\n\t"
             ".byte " +
-            std::to_string(b0) + ", " + std::to_string(b1) + ", " +
-            std::to_string(b2) + ", " + std::to_string(b3) + "\n\t";
+            std::to_string(b0) + ", " + std::to_string(b1) + "\n\t";
         InlineAsm *IA = InlineAsm::get(
             AsmFTy, AsmStr,
             /*Constraints=*/"~{memory}",
@@ -375,6 +378,12 @@ void handleIfEdges(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &s
             BasicBlock *FalseBB = BI->getSuccessor(i);
             if (pred_size(FalseBB) > 1)
             {
+                // The id must fit in 16 bits (0..65535); otherwise stop
+                // instrumenting. Checked before count++ and before any
+                // IR is created for this edge.
+                if (count > 0xFFFF)
+                    return;
+
                 int id = count++;
                 string name = "if.else.new";
                 name += std::to_string(id);
@@ -388,17 +397,14 @@ void handleIfEdges(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &s
                 }
                 IRBuilder<> Builder(NewElseBB);
 
-                // Encode id as 4 little-endian raw bytes placed right
-                // after the 0xcc trap byte — same convention as the
-                // loop guard's 0xf1 site. The runtime reads these
-                // directly off the SIGTRAP return address instead of
-                // decoding any instruction, so the offset (trap+1) is
-                // fixed regardless of codegen.
-                uint32_t uid = static_cast<uint32_t>(id);
+                // Encode id as 2 little-endian raw bytes placed right
+                // after the 0xcc trap byte (CC | id_lo | id_hi). The
+                // runtime reads these directly off the SIGTRAP return
+                // address instead of decoding any instruction, so the
+                // offset (trap+1) is fixed regardless of codegen.
+                uint16_t uid = static_cast<uint16_t>(id);
                 unsigned b0 = uid & 0xFF;
                 unsigned b1 = (uid >> 8) & 0xFF;
-                unsigned b2 = (uid >> 16) & 0xFF;
-                unsigned b3 = (uid >> 24) & 0xFF;
 
                 FunctionType *AsmFTy =
                     FunctionType::get(Type::getVoidTy(Ctx), /*isVarArg=*/false);
@@ -411,8 +417,7 @@ void handleIfEdges(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &s
                 std::string AsmStr =
                     ".byte 0xcc\n\t"
                     ".byte " +
-                    std::to_string(b0) + ", " + std::to_string(b1) + ", " +
-                    std::to_string(b2) + ", " + std::to_string(b3) + "\n\t";
+                    std::to_string(b0) + ", " + std::to_string(b1) + "\n\t";
 
                 InlineAsm *IA = InlineAsm::get(
                     AsmFTy, AsmStr,
