@@ -43,6 +43,9 @@ static KEEP file_ptr_obj *file_ptr_map = NULL;
 static KEEP unsigned char baseline_fd[MAX_FDS];
 static KEEP int baseline_taken = 0;
 
+/* Scratch list used by for_each_open_fd (zero-initialized, lives in .bss). */
+static int fd_list[MAX_FDS];
+
 static int is_std_stream(FILE *f)
 {
     return f == stdin || f == stdout || f == stderr;
@@ -60,12 +63,15 @@ static void track(FILE *f, int is_pipe)
     if (f == NULL || is_std_stream(f) || find_file_ptr(f) != NULL)
         return;
 
+    __untracer_heap_pause();
     file_ptr_obj *s = (file_ptr_obj *)malloc(sizeof(*s));
-    if (!s)
-        return;
-    s->f = f;
-    s->is_pipe = is_pipe;
-    HASH_ADD_PTR(file_ptr_map, f, s);
+    if (s)
+    {
+        s->f = f;
+        s->is_pipe = is_pipe;
+        HASH_ADD_PTR(file_ptr_map, f, s); // must be inside: allocates/grows the bucket table
+    }
+    __untracer_heap_resume();
 }
 
 static void untrack(FILE *f)
@@ -144,24 +150,37 @@ int __wrap_pclose(FILE *f)
 
 /* ---- raw fd handling --------------------------------------------------- */
 
-/* Calls cb(fd) for every open fd except the one used to read the directory. */
+/*
+ * Calls cb(fd) for every open fd except the one used to read the directory.
+ *
+ * Two passes: first collect the fd numbers and close the directory, then call
+ * the callback. That way cb may close descriptors without modifying
+ * /proc/self/fd while it is still being read, which readdir does not
+ * guarantee to handle correctly (entries can be skipped).
+ */
 static void for_each_open_fd(void (*cb)(int fd))
 {
     DIR *d = opendir("/proc/self/fd");
     if (!d)
         return;
 
-    int dfd = dirfd(d);
+    int dfd = dirfd(d); /* the directory's own fd shows up in its listing */
+    int n = 0;
     struct dirent *e;
     while ((e = readdir(d)) != NULL)
     {
         if (e->d_name[0] < '0' || e->d_name[0] > '9')
             continue;
         int fd = atoi(e->d_name);
-        if (fd != dfd)
-            cb(fd);
+        if (fd == dfd)
+            continue; /* closed below; must not be reported to cb */
+        if (fd >= 0 && fd < MAX_FDS && n < MAX_FDS)
+            fd_list[n++] = fd;
     }
     closedir(d);
+
+    for (int i = 0; i < n; i++)
+        cb(fd_list[i]);
 }
 
 static void mark_baseline(int fd)

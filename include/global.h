@@ -14,6 +14,10 @@ extern "C"
     void __untracer_setup_global(void);
     int __untracer_restore_global(void);
     void __untracer_snapshot_fds(void);
+    void __untracer_heap_start(void);
+    void __untracer_heap_pause(void);
+    void __untracer_heap_resume(void);
+    void __untracer_heap_reset(void);
 #ifdef __cplusplus
 }
 #endif

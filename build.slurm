@@ -112,7 +112,7 @@ grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
 
 # Runtime sources are compiled as C (-x c) so the --wrap symbols and the
 # __real_* declarations keep plain C names.
-RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c -x none"
+RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/heap_track.c -x none"
 WRAP_FLAGS="-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
             -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
 
@@ -151,6 +151,12 @@ nm $wrap/output/main.oracle | grep -q ' T __untracer_setup_global' \
     || { echo "ERROR: global runtime not linked"; exit 1; }
 nm $wrap/output/main.oracle | grep -q ' T __wrap_fopen' \
     || { echo "ERROR: file-handle wrappers not linked"; exit 1; }
+# malloc must be in the dynamic symbol table, or libc/libstdc++ will keep
+# calling their own copy and the heap tracker will miss their allocations.
+nm -D $wrap/output/main.oracle | grep -qE ' T malloc$' \
+    || { echo "ERROR: malloc is not exported by the executable"; exit 1; }
+nm -D $wrap/output/main.oracle | grep -qE ' T free$' \
+    || { echo "ERROR: free is not exported by the executable"; exit 1; }
 if nm $wrap/output/main.oracle | grep -q ' U __real_'; then
     echo "ERROR: unresolved __real_* symbols"; exit 1
 fi

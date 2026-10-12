@@ -20,7 +20,7 @@
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
 #include <mach-o/dyld.h>
-    extern const struct mach_header_64 _mh_execute_header;
+extern const struct mach_header_64 _mh_execute_header;
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -33,7 +33,6 @@ typedef unsigned char u8;
 
 uint32_t *virgin_bits;
 uint32_t *trace_bits;
-
 
 typedef struct
 {
@@ -82,9 +81,18 @@ void make_range_writable(uintptr_t start, uintptr_t end)
             exit(EXIT_FAILURE);
         }
 
+        /* This table must outlive every reset (mprotect changes and patched
+         * traps persist), so its memory must not be tracked by the heap
+         * tracker. HASH_ADD allocates the bucket table too, so it stays
+         * inside the pause. */
+        __untracer_heap_pause();
         writable_page *entry = (writable_page *)malloc(sizeof(writable_page));
-        entry->page = page;
-        HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
+        if (entry)
+        {
+            entry->page = page;
+            HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
+        }
+        __untracer_heap_resume();
     }
 }
 
@@ -241,7 +249,7 @@ void setup_shm(void)
     {
         char msg[256];
         snprintf(msg, sizeof(msg), "%s not set\n", SHM_ID);
-        log_line(msg);
+        log_line("%s", msg);
         exit(EXIT_FAILURE);
     }
 
@@ -252,7 +260,7 @@ void setup_shm(void)
     {
         char msg[256];
         snprintf(msg, sizeof(msg), "invalid %s value: %s\n", SHM_ID, env);
-        log_line(msg);
+        log_line("%s", msg);
         exit(EXIT_FAILURE);
     }
 
@@ -268,7 +276,7 @@ void setup_shm(void)
     {
         char msg[256];
         snprintf(msg, sizeof(msg), "%s not set\n", SHM_ENV_VAR);
-        log_line(msg);
+        log_line("%s", msg);
         exit(EXIT_FAILURE);
     }
 
@@ -278,8 +286,8 @@ void setup_shm(void)
     if (errno != 0 || endptr == trace_env || *endptr != '\0' || trace_id < 0)
     {
         char msg[256];
-        snprintf(msg, sizeof(msg), "invalid %s value: %s\n", SHM_ENV_VAR, env);
-        log_line(msg);
+        snprintf(msg, sizeof(msg), "invalid %s value: %s\n", SHM_ENV_VAR, trace_env);
+        log_line("%s", msg);
         exit(EXIT_FAILURE);
     }
 
@@ -311,8 +319,15 @@ static void run_persistent(char *argv0, char *input)
         char *args[] = {argv0, input, "/dev/null", NULL};
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
+
+        /* Reset order matters:
+         *  1. close files first (fclose needs the heap blocks it owns),
+         *  2. then free the heap blocks the target left behind,
+         *  3. then restore the globals that pointed at them. */
+        close_open_file_handles();
+        __untracer_heap_reset();
         __untracer_restore_global();
-        close_open_file_handles(); // new
+
         if (standalone)
             exit(0);
 
@@ -329,10 +344,18 @@ int main(int argc, char **argv)
         log_line("usage: harness <input_file>\n");
         exit(EXIT_FAILURE);
     }
+
+    /* Give stdout a static buffer now. Otherwise stdio allocates one on the
+     * first write, possibly after tracking starts, and the heap reset would
+     * free a buffer that stdout still points to. */
+    static char stdout_buf[BUFSIZ];
+    setvbuf(stdout, stdout_buf, _IOFBF, sizeof(stdout_buf));
+
     setup_shm();
     setup_signal();
-    __untracer_setup_global();
-    __untracer_snapshot_fds();
+    __untracer_setup_global(); /* globals snapshot */
+    __untracer_snapshot_fds(); /* fd baseline */
+    __untracer_heap_start();   /* from here on the heap tracker records */
     run_persistent(argv[0], argv[1]);
     return 0;
 }
