@@ -355,7 +355,6 @@ static void run_persistent(char *argv0, char *input)
          *  2. then free the heap blocks the target left behind,
          *  3. then restore the globals that pointed at them. */
         close_open_file_handles();
-        free_open_heap();
         __untracer_restore_global();
 
         if (standalone)
@@ -385,7 +384,6 @@ int main(int argc, char **argv)
     setup_signal();
     __untracer_setup_global(); /* globals snapshot */
     __untracer_snapshot_fds(); /* fd baseline */
-    __untracer_heap_start();   /* from here on the heap tracker records */
     run_persistent(argv[0], argv[1]);
     return 0;
 }

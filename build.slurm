@@ -112,14 +112,9 @@ grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
 
 # Runtime sources are compiled as C (-x c) so the --wrap symbols and the
 # __real_* declarations keep plain C names.
-RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/mem_track.c -x none"
+RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c -x none"
 WRAP_FLAGS="-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
-            -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose \
-            -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free \
-            -Wl,--wrap=reallocarray -Wl,--wrap=memalign -Wl,--wrap=aligned_alloc \
-            -Wl,--wrap=posix_memalign -Wl,--wrap=valloc -Wl,--wrap=pvalloc \
-            -Wl,--wrap=strdup -Wl,--wrap=strndup \
-            -Wl,--wrap=getline -Wl,--wrap=getdelim"
+            -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
 
 echo "Building final binary"
 if [[ "$(uname -s)" == "Darwin" ]]; then
