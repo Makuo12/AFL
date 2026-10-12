@@ -1,12 +1,12 @@
 #define _GNU_SOURCE
+#include <errno.h>
 #include <malloc.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#include <errno.h>
-#include "global.h"
+#include "global.h" /* also declares __real_malloc / __real_free */
 
 /*
  * Tracks heap blocks allocated during one persistent iteration and frees
@@ -20,16 +20,14 @@
  *   -Wl,--wrap=getline -Wl,--wrap=getdelim
  *
  * Bookkeeping uses __real_malloc/__real_free only, so it never recurses into
- * the wrappers. uthash must be told to do the same (macros below, before the
- * include). This file must NOT go through CloneGlobalsPass.
+ * the wrappers and is never tracked itself (no pause/resume needed). uthash
+ * is told to do the same (macros below, before the include). This file must
+ * NOT go through CloneGlobalsPass.
  */
 #define KEEP __attribute__((section("untracer_state")))
 
-void *__real_malloc(size_t n);
 void *__real_calloc(size_t a, size_t b);
 void *__real_realloc(void *p, size_t n);
-void __real_free(void *p);
-void *__real_reallocarray(void *p, size_t a, size_t b);
 void *__real_memalign(size_t al, size_t n);
 void *__real_aligned_alloc(size_t al, size_t n);
 int __real_posix_memalign(void **out, size_t al, size_t n);
@@ -43,7 +41,6 @@ ssize_t __real_getdelim(char **lp, size_t *n, int d, FILE *f);
 #define uthash_malloc(sz) __real_malloc(sz)
 #define uthash_free(ptr, sz) __real_free(ptr)
 #include "uthash.h"
-#include "global.h"
 
 typedef struct
 {
@@ -66,14 +63,12 @@ static void track_heap(void *p)
     if (!heap_tracking || p == NULL || find_heap(p) != NULL)
         return;
 
-    __untracer_heap_pause();
     heap_obj *s = (heap_obj *)__real_malloc(sizeof(*s));
     if (s)
     {
         s->p = p;
-        HASH_ADD_PTR(heap_map, p, s); /* may allocate the bucket table */
+        HASH_ADD_PTR(heap_map, p, s); /* bucket table also uses __real_malloc */
     }
-    __untracer_heap_resume();
 }
 
 static void drop_node(heap_obj *s)

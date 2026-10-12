@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "global.h"
+#include "global.h" /* also declares __real_malloc / __real_free */
 
 /*
  * Linux-only global snapshot/restore.
@@ -32,9 +32,13 @@ extern "C"
     static KEEP size_t snapshot_size = 0;
     static KEEP int ready = 0;
 
-    /* Call once, after static initialization (e.g. at the start of main). */
+    /* Call once, after static initialization (e.g. at the start of main),
+     * and before __untracer_heap_start(). */
     void __untracer_setup_global(void)
     {
+        if (ready) /* a second call would leak the first snapshot */
+            return;
+
         char *start = __start___cls_glob;
         char *stop = __stop___cls_glob;
 
@@ -44,20 +48,25 @@ extern "C"
             return;
         }
 
-        snapshot_size = (size_t)(stop - start);
-        snapshot = (char *)malloc(snapshot_size);
-        if (!snapshot)
+        size_t size = (size_t)(stop - start);
+
+        /* __real_malloc: the snapshot must survive every reset, so it must
+         * never be registered with the heap tracker (which would free it). */
+        char *buf = (char *)__real_malloc(size);
+        if (!buf)
         {
-            perror("malloc");
-            snapshot_size = 0;
+            perror("global snapshot malloc");
             return;
         }
 
-        memcpy(snapshot, start, snapshot_size);
+        memcpy(buf, start, size);
+        snapshot = buf;
+        snapshot_size = size;
         ready = 1;
     }
 
-    /* Returns 0 on success, -1 if setup did not succeed. */
+    /* Returns 0 on success, -1 if setup did not succeed. The caller should
+     * check this: ignoring -1 means globals silently stop being restored. */
     int __untracer_restore_global(void)
     {
         if (!ready)
