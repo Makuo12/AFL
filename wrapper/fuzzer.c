@@ -27,6 +27,7 @@ extern const struct mach_header_64 _mh_execute_header;
 /* Prototypes for externally-defined symbols                          */
 /* ------------------------------------------------------------------ */
 
+extern void __reset_loop_counters(void);
 extern int target_main(int argc, char **argv);
 
 typedef unsigned char u8;
@@ -306,7 +307,7 @@ static void run_persistent(char *argv0, char *input)
 
     /* If fd 199 isn't open we're not under afl-fuzz: run once and exit. */
     int standalone = (write(FORKSRV_FD + 1, &msg, 4) != 4);
-
+    char *args[] = {argv0, input, "/dev/null", NULL};
     for (;;)
     {
         if (!standalone)
@@ -315,8 +316,7 @@ static void run_persistent(char *argv0, char *input)
             if (read(FORKSRV_FD, &cmd, 4) != 4)
                 _exit(0); /* afl went away */
         }
-
-        char *args[] = {argv0, input, "/dev/null", NULL};
+        __reset_loop_counters();
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
 
