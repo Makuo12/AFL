@@ -30,7 +30,7 @@ fi
 echo "Building afl_fuzz"
 AFL_NO_X86=1 make -C $wrap/fuzzer afl-fuzz
 
-PERF_FLAGS="-O3 -funroll-loops -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden -fno-pie -fno-plt -fcf-protection=none"
+PERF_FLAGS="-O3 -funroll-loops -DNDEBUG -fno-stack-protector -fomit-frame-pointer -fno-semantic-interposition -fvisibility=hidden"
 
 LIB_PATH="$(llvm-config --libdir)"
 BIN_PATH="$(llvm-config --bindir)"
@@ -156,6 +156,4 @@ fi
 #     || { echo "ERROR: global runtime not linked"; exit 1; }
 # nm $wrap/output/main.oracle | grep -q ' T __wrap_fopen' \
 #     || { echo "ERROR: file-handle wrappers not linked"; exit 1; }
-# malloc must be in the dynamic symbol table, or libc/libstdc++ will keep
-
 echo "Done with build"
