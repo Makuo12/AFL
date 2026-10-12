@@ -64,6 +64,8 @@ std::vector<std::string> skipFunctions = {
     "__untracer_restore_global_sections",
     "__untracer_restore_global",
     "__untracer_setup_global",
+
+    "main"
 };
 
 bool foundInSkipFunctions(StringRef fName)
@@ -103,12 +105,9 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
     {
         if (!shouldProcessFunction(F))
             continue;
-        // handlePCTable(F, M); // not needed for de-instrumentation
         instrumentBlocks(F, seen, wholeCount);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
             handleDefaultBlockEdge(*BB.getTerminator(), wholeCount, seen);
-        // for (BasicBlock &BB : llvm::make_early_inc_range(F))
-        //     handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
             handleIfEdges(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
