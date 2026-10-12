@@ -97,7 +97,7 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
 
     // Create up front so a harness declaring
     // `extern "C" void __reset_loop_counters()` links even with 0 loops.
-    getOrCreateResetFn(M);
+    // getOrCreateResetFn(M);
 
     // ---- Phase 1: edge handlers, all functions ----
     // These split blocks / edges, so they run BEFORE we count loop headers.
@@ -114,42 +114,42 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
             handleInvokeEdges(*BB.getTerminator(), wholeCount, seen);
     }
     // ---- Phase 2: count loop headers, create the array + reset body ----
-    unsigned N = countLoopHeaders(M);
-    GlobalVariable *CounterArr = nullptr;
-    if (N > 0)
-    {
-        CounterArr = createCounterArray(M, N);
-        buildResetFn(M, CounterArr, N);
-    }
+    // unsigned N = countLoopHeaders(M);
+    // GlobalVariable *CounterArr = nullptr;
+    // if (N > 0)
+    // {
+    //     CounterArr = createCounterArray(M, N);
+    //     buildResetFn(M, CounterArr, N);
+    // }
 
-    // ---- Phase 3: loop guards, then block instrumentation, per function ----
-    // Same per-function order as before (loops, then instrumentBlocks).
-    unsigned slot = 0;
-    for (Function &F : M)
-    {
-        if (!shouldProcessFunction(F))
-            continue;
-        if (CounterArr)
-            processLoop(&F, CounterArr, slot, wholeCount);
-        // Handle PCTable
-    }
-    assert(slot == N && "loop count and loop instrumentation disagree");
+    // // ---- Phase 3: loop guards, then block instrumentation, per function ----
+    // // Same per-function order as before (loops, then instrumentBlocks).
+    // unsigned slot = 0;
+    // for (Function &F : M)
+    // {
+    //     if (!shouldProcessFunction(F))
+    //         continue;
+    //     if (CounterArr)
+    //         processLoop(&F, CounterArr, slot, wholeCount);
+    //     // Handle PCTable
+    // }
+    // assert(slot == N && "loop count and loop instrumentation disagree");
 
-    // Call the reset at the top of LLVMFuzzerTestOneInput. Delete this line
-    // if you call __reset_loop_counters() from your own harness.
-    // insertResetCall(M);
+    // // Call the reset at the top of LLVMFuzzerTestOneInput. Delete this line
+    // // if you call __reset_loop_counters() from your own harness.
+    // // insertResetCall(M);
 
-    for (auto bb : pctableSeen)
-    {
-        bool found = false;
-        for (Function &F : M)
-        {
-            if (bb->getParent() == &F)
-                found = true;
-        }
-        if (!found)
-            errs() << "Basic block not found: " << bb << "\n";
-    }
+    // for (auto bb : pctableSeen)
+    // {
+    //     bool found = false;
+    //     for (Function &F : M)
+    //     {
+    //         if (bb->getParent() == &F)
+    //             found = true;
+    //     }
+    //     if (!found)
+    //         errs() << "Basic block not found: " << bb << "\n";
+    // }
 }
 
 int writeInfo(map<string, BlockInfo> &blocks)
