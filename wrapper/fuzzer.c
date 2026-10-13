@@ -69,6 +69,18 @@ typedef struct
 
 KEEP writable_page *writable_pages = NULL;
 
+#define DEFAULT_LOG_PATH "./output/trap_handler.log"
+static KEEP char log_path[4096] = DEFAULT_LOG_PATH;
+
+static void init_log_path(void)
+{
+    const char *p = getenv("LOG_FILE");
+    if (p && *p && strlen(p) < sizeof(log_path))
+    {
+        strcpy(log_path, p);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Logging                                                            */
 /* ------------------------------------------------------------------ */
@@ -76,7 +88,7 @@ KEEP writable_page *writable_pages = NULL;
 /* NOT safe to call from signal handlers (stdio + malloc). */
 void log_line(const char *fmt, ...)
 {
-    FILE *log_file = fopen("./output/trap_handler.log", "a");
+    FILE *log_file = fopen(log_path, "a");
     if (!log_file)
         log_file = stderr; // fallback
 
@@ -106,7 +118,7 @@ static void sig_log(const char *msg, uintptr_t val)
         buf[n++] = hex[(val >> s) & 0xf];
     buf[n++] = '\n';
 
-    int fd = open("./output/trap_handler.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+    int fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd >= 0)
     {
         (void)!write(fd, buf, n);
@@ -368,6 +380,7 @@ static void run_persistent(char *argv0, char *input)
 
 int main(int argc, char **argv)
 {
+    init_log_path();
     if (argc < 2)
     {
         log_line("usage: harness <input_file>\n");

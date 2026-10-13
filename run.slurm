@@ -9,7 +9,7 @@
 #SBATCH --mem-per-cpu=4G
 #SBATCH --output=./logs/fuzz-%j.log
 #SBATCH --error=./logs/fuzz-%j.log
-#SBATCH --array=1-3
+#SBATCH --array=1-5
 
 set -euo pipefail
 export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
@@ -27,10 +27,10 @@ TRACE="main.trace"
 ORACLE="main.oracle"
 PROGRAM="improving_afl"
 
+
 if [[ "${1:-}" = "arc" ]]; then
 module load LLVM/20.1.8-GCCcore-14.3.0
     module load GCCcore/14.3.0
-
     ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0}"
     FULL_ID="${PROGRAM}_${ID}"
 
@@ -51,7 +51,7 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     SUT_ORACLE="$output/$ORACLE"
     SUT_TRACE="$output/$TRACE"
     SUT_ARGS=(@@ /dev/null)
-
+    export LOG_FILE="$OUTROOT/fuzzer_log_file"
     mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR"
     cp -rf "$wrap/testcases/pdf/." "$tmp_input/"
     SEED_DIR="$tmp_input"
@@ -89,10 +89,6 @@ else
     [ -x "$SUT_ORACLE" ] || { echo "Missing oracle: $SUT_ORACLE" >&2; exit 1; }
     [ -x "$SUT_TRACE" ] || { echo "Missing trace: $SUT_TRACE" >&2; exit 1; }
 fi
-
-# Assumes one cpu per task
-CPU=$(grep Cpus_allowed_list /proc/self/status | awk '{print $2}')
-
 
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
