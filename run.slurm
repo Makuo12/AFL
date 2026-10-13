@@ -22,8 +22,7 @@ export AFL_DISABLE_TRIM=1
 export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
 export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
-FUZZ_SECONDS=$((24*60*60))
-TRACE="main.trace"
+FUZZ_SECONDS=$((1*60*60))
 ORACLE="main.oracle"
 PROGRAM="de_edge_afl"
 
@@ -51,7 +50,6 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     OUTROOT="$tmp_base/$FULL_ID"            # node-local fuzzer output (wiped at job end)
     RESULTS_DIR="$output/results"             # persistent results
     SUT_ORACLE="$output/$ORACLE"
-    SUT_TRACE="$output/$TRACE"
     SUT_ARGS=(@@ /dev/null)
     
     FASTROOT="$tmpfs_base/$FULL_ID"            # node-local fuzzer output (wiped at job end)
@@ -65,11 +63,13 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     export LOOP_THRESHOLD_FILE="$FASTROOT/fuzzer_loop_threshold.txt"
     export META_DATA_FILE="$FASTROOT/fuzzer_meta_data.txt"
     export OUTPUT_HOME="$output"
-    export DE_EDGE_MAX=4000 # This holds the max for edges to now de-instrument
+    export DE_EDGE_MAX=4000 # new edges + loop buckets before we de-instrument
+    export DE_EDGE_ARC=1    # relink with bfd + image-base like build.slurm
+    export WRAP_HOME="$wrap"
+    export CLANGXX="$(llvm-config --bindir)/clang++"
 
     [ -d "$SEED_DIR" ] || { echo "Missing seed dir: $SEED_DIR" >&2; exit 1; }
     [ -x "$SUT_ORACLE" ] || { echo "Missing oracle: $SUT_ORACLE" >&2; exit 1; }
-    [ -x "$SUT_TRACE" ] || { echo "Missing trace: $SUT_TRACE" >&2; exit 1; }
 
 else
     # run on my local linux machine
@@ -88,26 +88,30 @@ else
     RESULTS_DIR="$output/results"
 
     SUT_ORACLE="$output/$ORACLE"
-    SUT_TRACE="$output/$TRACE"
     SUT_ARGS=(@@ /dev/null)
 
     mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR"
     cp -rf "$wrap/testcases/pdf/." "$tmp_input/"
     SEED_DIR="$tmp_input"
-    export LOOP_THRESHOLD_FILE="./output/loop_threshold.txt"
+    export LOG_FILE="$OUTROOT/fuzzer_log_file"
+    export LOOP_THRESHOLD_FILE="$OUTROOT/fuzzer_loop_threshold.txt"
+    export META_DATA_FILE="$OUTROOT/fuzzer_meta_data.txt"
+    export OUTPUT_HOME="$output"
+    export DE_EDGE_MAX=4000
+    export WRAP_HOME="$wrap"
+    export CLANGXX="${CLANGXX:-$(llvm-config --bindir)/clang++}"
 
     [ -d "$SEED_DIR" ] || { echo "Missing seed dir: $SEED_DIR" >&2; exit 1; }
     [ -x "$SUT_ORACLE" ] || { echo "Missing oracle: $SUT_ORACLE" >&2; exit 1; }
-    [ -x "$SUT_TRACE" ] || { echo "Missing trace: $SUT_TRACE" >&2; exit 1; }
 fi
 
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 5000 -m 2048 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 2048 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 5000 -m 2048 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 2048 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 

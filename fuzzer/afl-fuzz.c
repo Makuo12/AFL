@@ -92,22 +92,24 @@ afl-fuzz.c
 /* Lots of globals, but mostly for the status UI and other things where it
    really makes no sense to haul them around as function parameters. */
 
-EXP_ST u8 *in_dir, /* Input directory with test cases  */
-    *out_file,     /* File to fuzz, if any             */
-    *out_dir,      /* Working & output directory       */
-    *sync_dir,     /* Synchronization directory        */
-    *sync_id,      /* Fuzzer ID                        */
-    *use_banner,   /* Display banner                   */
-    *in_bitmap,    /* Input bitmap                     */
-    *doc_path,     /* Path to documentation dir        */
-    *target_path,  /* Path to target binary            */
-    *oracle_path,  /* Path to target binary            */
-    *orig_cmdline; /* Original command line            */
-    *remove_edge_bin;
-    *meta_data_file;
-    *loop_threshold_file;
-    *main_transformed_ll;
-    *fuzzer_bc;
+EXP_ST u8 *in_dir,        /* Input directory with test cases  */
+    *out_file,            /* File to fuzz, if any             */
+    *out_dir,             /* Working & output directory       */
+    *sync_dir,            /* Synchronization directory        */
+    *sync_id,             /* Fuzzer ID                        */
+    *use_banner,          /* Display banner                   */
+    *in_bitmap,           /* Input bitmap                     */
+    *doc_path,            /* Path to documentation dir        */
+    *oracle_path,         /* Path to the (only) fuzzed binary */
+    *orig_cmdline,        /* Original command line            */
+    *remove_edge_bin,     /* remove_edge tool (DeIntrumentation.cc) */
+    *meta_data_file,      /* ids hit/retired since last rebuild     */
+    *loop_threshold_file, /* "id,cmp_value" loop thresholds        */
+    *main_transformed_ll, /* instrumented IR the oracle is built from */
+    *fuzzer_bc,           /* harness bitcode                        */
+    *de_output_home,      /* per-task copy of output/               */
+    *wrap_home,           /* project root (wrapper/, include/)      */
+    *clangxx_bin;         /* clang++ used for the relink            */
 
 Trace *trap_addr;
 
@@ -244,8 +246,10 @@ static u64 total_bitmap_size, /* Total bit count for all bitmaps  */
 
 static s32 cpu_core_count; /* CPU core count                   */
 
-static u32 DE_EDGE_COUNT;
-static u32 DE_EDGE_LOOP_COUNT;
+static u32 DE_EDGE_COUNT;      /* new edges since last de-instrumentation   */
+static u32 DE_EDGE_LOOP_COUNT; /* new loop buckets since last de-instrument. */
+static u32 de_edge_max = 4000; /* DE_EDGE_MAX env                         */
+static u8 de_arc;              /* DE_EDGE_ARC env: bfd + image-base link  */
 
 #ifdef HAVE_AFFINITY
 
@@ -2414,6 +2418,16 @@ static u8 run_target(char **argv, u32 timeout, char *input, int for_oracle)
 
   tb4 = *(u32 *)trace_bits; /* keep this read first (EXEC_FAIL_SIG) */
 
+  /* Every execution (fuzzing, calibration, crash re-runs) funnels through
+     here, so this is the one place to tally what the harness newly reported:
+     trace_bits[0] = new edges, trace_bits[3] = new loop buckets. They must be
+     read before any later run_target() (e.g. calibration) clears them. */
+  if (tb4 != EXEC_FAIL_SIG)
+  {
+    DE_EDGE_COUNT += trace_bits[0];
+    DE_EDGE_LOOP_COUNT += trace_bits[3];
+  }
+
   prev_timed_out = child_timed_out;
 
   /* Report outcome to caller. */
@@ -2555,7 +2569,7 @@ static u8 calibrate_case_handle(char **argv, struct queue_entry *q, u8 *use_mem,
 
     write_to_testcase(use_mem, q->len);
 
-    fault = run_target(argv, use_tmout, out_file, 0); /* target_path */
+    fault = run_target(argv, use_tmout, out_file, 0);
 
     hnb = handle_new_coverage();
     if (hnb > new_bits)
@@ -2644,7 +2658,7 @@ abort_calibration:
 
 //     write_to_testcase(use_mem, q->len);
 
-//     fault = run_target(argv, use_tmout, out_file, 0); /* target_path */
+//     fault = run_target(argv, use_tmout, out_file, 0);
 
 //     if (stop_soon || fault != crash_mode)
 //       goto abort_calibration;
@@ -3262,7 +3276,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     }
 
     /* exec_cksum left at 0 on purpose - calibrate_case sets it from a
-       target_path run, which is the only trace we want it derived from. */
+       oracle run, which is the only trace we want it derived from. */
 
     res = calibrate_case_handle(argv, queue_top, mem, queue_cycle - 1, 0);
 
@@ -3295,7 +3309,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
       u8 retrace_fault;
 
       /* The oracle trace from the hanging run is too sparse to dedupe
-         against virgin_tmout. Re-run on target_path with the generous
+         against virgin_tmout. Re-run on the oracle with the generous
          hang timeout - this both confirms it's a real hang (not a
          scheduler fluke under the tight exec_tmout) and gives us a
          full trace to classify it with. */
@@ -3356,10 +3370,10 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     if (!dumb_mode)
     {
 
-      /* Same reasoning as timeouts: re-run on target_path for a full,
+      /* Same reasoning as timeouts: re-run on the oracle for a full,
          comparable trace before deduping against virgin_crash. Skip
          this if we arrived here via the tmout path above, since
-         trace_bits is already a target_path trace in that case. */
+         trace_bits is already an oracle trace in that case. */
 
       if (fault != FAULT_TMOUT)
       {
@@ -3372,7 +3386,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
         if (stop_soon)
           return keeping;
 
-        /* If it doesn't reproduce as a crash on target_path, something
+        /* If it doesn't reproduce as a crash on the oracle, something
            is off (timing-sensitive bug, OOM under oracle vs target,
            etc). Bail rather than save a possibly-misclassified input. */
 
@@ -4742,7 +4756,7 @@ static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
 
       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-      fault = run_target(argv, exec_tmout, out_file, 0); /* target_path - needs comparable full trace */
+      fault = run_target(argv, exec_tmout, out_file, 0); /* needs comparable full trace */
       trim_execs++;
 
       if (stop_soon || fault == FAULT_ERROR)
@@ -4851,44 +4865,164 @@ static int run(char *const argv[])
   return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
 }
 
+/* ---------------- DE-INSTRUMENTATION ----------------
+ * Pipeline (mirrors build.slurm):
+ *   1. remove_edge -i main.transformed.ll -m meta -l thresholds -o <new .ll>
+ *   2. clang++ <new .ll> + runtime + fuzzer.bc  ->  <new oracle>
+ *   3. only if both succeeded: rename both over the live files, truncate the
+ *      meta/threshold files (everything in them is now baked into the IR).
+ * Nothing live is touched until step 3, so a failure leaves the old oracle
+ * and IR intact and fuzzing can simply continue with them.
+ */
 
-// Layout assumed by this function (matches build.sh):
-//   p->transformed_ll : main.transformed.ll, the instrumented program ONLY
-//                       (the fuzzer runtime is NOT linked into it)
-//   p->wrapper_bc     : fuzzer.bc, linked in at this relink step
-// The relink uses the same codegen-only flags as FINAL_FLAGS in build.sh
-// (-O3 backend, IR passes disabled) so the remaining traps are not reshaped.
-void remove_instrumentation()
+#define DE_MAX_ARGS 96
+
+static void truncate_file(const u8 *path)
 {
-
-      char *stage1[] = {remove_edge_bin, "-i", main_transformed_ll,
-                        "-m", meta_data_file, "-o", main_transformed_ll,
-                        "-l", loop_threshold_file, NULL};
-
-
-  char image_base_arg[64];
-  RUNTIME = "-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/heap_track_oa.c -x none"
-
-#File - handle wrappers(filer.c)
-      FILE_WRAP_FLAGS = "-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
-                 -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
-
-#Heap wrappers(heap_track_oa.c)
-      MEM_WRAP_FLAGS = "-Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free \
-                -Wl,--wrap=reallocarray -Wl,--wrap=memalign -Wl,--wrap=aligned_alloc \
-                -Wl,--wrap=posix_memalign -Wl,--wrap=valloc -Wl,--wrap=pvalloc \
-                -Wl,--wrap=strdup -Wl,--wrap=strndup \
-                -Wl,--wrap=getline -Wl,--wrap=getdelim"
-stage to should re-build main.oracle 
-
-      if (run(stage1) != 0 || run(stage2) != 0)
-  {
-    fprintf(stderr, "de-instrumentation failed\n");
-    exit(EXIT_FAILURE); // atexit cleans up shm in the parent
-  }
-  FILE *f = fopen(p->meta_data, "w");
+  FILE *f = fopen(path, "w");
   if (f)
     fclose(f);
+}
+
+/* Returns 0 on success, -1 on failure (live files untouched). */
+static int remove_instrumentation(void)
+{
+  u8 *new_ll = alloc_printf("%s/main.transformed.new.ll", de_output_home);
+  u8 *new_oracle = alloc_printf("%s.new", oracle_path);
+  u8 *inc_dir = alloc_printf("%s/include", wrap_home);
+  u8 *rt_global = alloc_printf("%s/wrapper/global.c", wrap_home);
+  u8 *rt_filer = alloc_printf("%s/wrapper/filer.c", wrap_home);
+  u8 *rt_heap = alloc_printf("%s/wrapper/heap_track_oa.c", wrap_home);
+  u8 *inc_flag = alloc_printf("-I%s", inc_dir);
+  u8 *to_free[DE_MAX_ARGS];
+  u32 nfree = 0, i;
+  int rc = -1;
+
+  static const char *wrap_syms[] = {
+      /* filer.c */
+      "fopen", "fopen64", "freopen", "fdopen", "tmpfile", "popen", "fclose",
+      "pclose",
+      /* heap_track_oa.c */
+      "malloc", "calloc", "realloc", "free", "reallocarray", "memalign",
+      "aligned_alloc", "posix_memalign", "valloc", "pvalloc", "strdup",
+      "strndup", "getline", "getdelim"};
+
+  /* Stage 1: IR -> IR. */
+  char *stage1[] = {(char *)remove_edge_bin, "-i", (char *)main_transformed_ll,
+                    "-m", (char *)meta_data_file, "-o", (char *)new_ll,
+                    "-l", (char *)loop_threshold_file, NULL};
+
+  /* Stage 2: relink with the same flags as the final link in build.slurm. */
+  char *stage2[DE_MAX_ARGS];
+  u32 n = 0;
+
+  stage2[n++] = (char *)clangxx_bin;
+  stage2[n++] = "-O3";
+  stage2[n++] = "-funroll-loops";
+  stage2[n++] = "-DNDEBUG";
+  stage2[n++] = "-fno-stack-protector";
+  stage2[n++] = "-fomit-frame-pointer";
+  stage2[n++] = "-fno-semantic-interposition";
+  stage2[n++] = "-fvisibility=hidden";
+  stage2[n++] = (char *)inc_flag;
+  stage2[n++] = (char *)new_ll;
+  stage2[n++] = "-x";
+  stage2[n++] = "c";
+  stage2[n++] = (char *)rt_global;
+  stage2[n++] = (char *)rt_filer;
+  stage2[n++] = (char *)rt_heap;
+  stage2[n++] = "-x";
+  stage2[n++] = "none";
+  stage2[n++] = (char *)fuzzer_bc;
+  stage2[n++] = "-no-pie";
+  if (de_arc)
+  {
+    stage2[n++] = "-fuse-ld=bfd";
+    stage2[n++] = "-Wl,--image-base=0x400000";
+    stage2[n++] = "-Wl,-z,noseparate-code";
+  }
+  for (i = 0; i < sizeof(wrap_syms) / sizeof(wrap_syms[0]); i++)
+  {
+    u8 *w = alloc_printf("-Wl,--wrap=%s", wrap_syms[i]);
+    to_free[nfree++] = w;
+    stage2[n++] = (char *)w;
+  }
+  stage2[n++] = "-o";
+  stage2[n++] = (char *)new_oracle;
+  stage2[n] = NULL;
+
+  if (run(stage1) != 0)
+  {
+    WARNF("de-instrumentation: remove_edge failed");
+    goto out;
+  }
+  if (run(stage2) != 0)
+  {
+    WARNF("de-instrumentation: relink failed");
+    goto out;
+  }
+
+  /* Commit. The harness is not running, so replacing the file is safe. */
+  if (chmod(new_oracle, 0755) || rename(new_oracle, oracle_path) ||
+      rename(new_ll, main_transformed_ll))
+  {
+    WARNF("de-instrumentation: commit failed: %s", strerror(errno));
+    goto out;
+  }
+
+  /* Everything in these is baked into the new IR now. */
+  truncate_file(meta_data_file);
+  truncate_file(loop_threshold_file);
+  rc = 0;
+
+out:
+  if (rc)
+  {
+    unlink(new_ll);
+    unlink(new_oracle);
+  }
+  for (i = 0; i < nfree; i++)
+    ck_free(to_free[i]);
+  ck_free(new_ll);
+  ck_free(new_oracle);
+  ck_free(inc_dir);
+  ck_free(rt_global);
+  ck_free(rt_filer);
+  ck_free(rt_heap);
+  ck_free(inc_flag);
+  return rc;
+}
+
+/* Called between runs. Once the edges + loop buckets newly reported since
+   the last rebuild exceed DE_EDGE_MAX: stop the harness, rebuild the oracle
+   without the instrumentation that already fired, and start the harness
+   again. */
+static void maybe_deinstrument(char **argv)
+{
+  if (DE_EDGE_COUNT + DE_EDGE_LOOP_COUNT <= de_edge_max)
+    return;
+
+  ACTF("De-instrumenting (%u new edges, %u loop buckets)...",
+       DE_EDGE_COUNT, DE_EDGE_LOOP_COUNT);
+
+  /* Stop the persistent harness (idle between runs) and reap it. */
+  reap_harness(1);
+
+  if (remove_instrumentation() == 0)
+  {
+    OKF("De-instrumentation done, restarting harness.");
+    DE_EDGE_COUNT = 0;
+    DE_EDGE_LOOP_COUNT = 0;
+    DE_INSTRUMENTED = 1;
+  }
+  else
+  {
+    /* Rebuild failed: stop the fuzzer. The harness is already reaped, and
+       the old oracle/IR are untouched for inspection. */
+    FATAL("De-instrumentation failed, exiting");
+  }
+
+  init_forkserver(argv);
 }
 
 /* Write a modified test case, run program, process results. Handle
@@ -4942,13 +5076,12 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len)
 
   queued_discovered += save_if_interesting(argv, out_buf, len, fault);
 
-  DE_EDGE_COUNT+=trace_bits[0];
-  DE_EDGE_LOOP_COUNT+=trace_bits[3];
+  /* Between runs the harness is idle, so this is a safe point to swap the
+     binary underneath it. */
+  maybe_deinstrument(argv);
 
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
-
-    de
 
   return 0;
 }
@@ -7074,7 +7207,6 @@ retry_splicing:
       splicing_with++;
     }
 
-
     if (!target)
       goto retry_splicing;
 
@@ -7338,74 +7470,68 @@ static void handle_timeout(int sig)
   }
 }
 
-EXP_ST void setup_env_files(){
-  char *output_home = getenv("OUTPUT_HOME");
-  if (!output_home || strlen(output_home) < 1) {
-    exit(EXIT_FAILURE);
-  }
-  char *env_meta_file = getenv("META_DATA_FILE");
-  if (!env_meta_file || strlen(env_meta_file) < 1) {
-    exit(EXIT_FAILURE);
-  }
-  meta_data_file = ck_strdup(env_meta_file);
-  if (!meta_data_file) {
-    exit(EXIT_FAILURE);
-  }
-  char *env_loop_threshold_file = getenv("LOOP_THRESHOLD_FILE");
-  if (!env_loop_threshold_file || strlen(env_loop_threshold_file) < 1) {
-    exit(EXIT_FAILURE);
-  }
-  loop_threshold_file = ck_strdup(env_loop_threshold_file);
-  if (!loop_threshold_file) {
-    exit(EXIT_FAILURE);
-  }
-  main_transformed_ll = alloc_printf("%s/main.transformed.ll", output_home);
-  remove_edge_bin = alloc_printf("%s/remove_edge", output_home);
-  remove_edge_bin = alloc_printf("%s/fuzzer.bc", output_home);
+static u8 *require_env(const char *name)
+{
+  u8 *v = getenv(name);
+  if (!v || !*v)
+    FATAL("%s is not set", name);
+  return v;
 }
 
-/* Do a PATH search and find target binary to see that it exists and
-   isn't a shell script - a common and painful mistake. We also check for
-   a valid ELF header and for evidence of AFL instrumentation. */
+EXP_ST void setup_env_files(void)
+{
+  u8 *v;
 
-EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
+  de_output_home = ck_strdup(require_env("OUTPUT_HOME"));
+  meta_data_file = ck_strdup(require_env("META_DATA_FILE"));
+  loop_threshold_file = ck_strdup(require_env("LOOP_THRESHOLD_FILE"));
+  wrap_home = ck_strdup(require_env("WRAP_HOME"));
+  clangxx_bin = ck_strdup(require_env("CLANGXX"));
+
+  main_transformed_ll = alloc_printf("%s/main.transformed.ll", de_output_home);
+  remove_edge_bin = alloc_printf("%s/remove_edge", de_output_home);
+  fuzzer_bc = alloc_printf("%s/fuzzer.bc", de_output_home);
+
+  if ((v = getenv("DE_EDGE_MAX")) && *v)
+    de_edge_max = (u32)strtoul(v, NULL, 10);
+  de_arc = !!getenv("DE_EDGE_ARC");
+}
+
+/* Do a PATH search and find the binary to see that it exists and isn't a
+   shell script - a common and painful mistake. We also check for a valid ELF
+   header and for evidence of instrumentation. There is only one binary now:
+   the oracle, which is both what gets fuzzed and what gets rebuilt in place
+   by remove_instrumentation(). */
+
+EXP_ST void check_binary(u8 *oracle_name)
 {
 
   u8 *env_path = 0;
-  struct stat st_target;
   struct stat st_oracle;
 
   s32 fd;
   u8 *f_data;
   u32 f_len = 0;
 
-  ACTF("Validating target binary...");
+  ACTF("Validating binary...");
 
-  if (strchr(target_name, '/') || strchr(oracle_name, '/') ||
-      !(env_path = getenv("PATH")))
+  if (strchr(oracle_name, '/') || !(env_path = getenv("PATH")))
   {
 
-    target_path = ck_strdup(target_name);
     oracle_path = ck_strdup(oracle_name);
 
-    if (stat(target_path, &st_target) || !S_ISREG(st_target.st_mode) ||
-        !(st_target.st_mode & 0111) || (f_len = st_target.st_size) < 4)
-      FATAL("Program '%s' not found or not executable", target_name);
-
     if (stat(oracle_path, &st_oracle) || !S_ISREG(st_oracle.st_mode) ||
-        !(st_oracle.st_mode & 0111) || st_oracle.st_size < 4)
+        !(st_oracle.st_mode & 0111) || (f_len = st_oracle.st_size) < 4)
       FATAL("Program '%s' not found or not executable", oracle_name);
   }
   else
   {
 
-    u8 target_found = 0, oracle_found = 0;
-
     while (env_path)
     {
 
       u8 *cur_elem, *delim = strchr(env_path, ':');
-      u8 *cand_target, *cand_oracle;
+      u8 *cand_oracle;
 
       if (delim)
       {
@@ -7419,44 +7545,22 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
       env_path = delim;
 
       if (cur_elem[0])
-      {
-        cand_target = alloc_printf("%s/%s", cur_elem, target_name);
         cand_oracle = alloc_printf("%s/%s", cur_elem, oracle_name);
-      }
       else
-      {
-        cand_target = ck_strdup(target_name);
         cand_oracle = ck_strdup(oracle_name);
-      }
       ck_free(cur_elem);
 
-      if (!target_found && !stat(cand_target, &st_target) &&
-          S_ISREG(st_target.st_mode) && (st_target.st_mode & 0111) &&
-          (f_len = st_target.st_size) >= 4)
-      {
-        target_path = cand_target;
-        target_found = 1;
-      }
-      else
-        ck_free(cand_target);
-
-      if (!oracle_found && !stat(cand_oracle, &st_oracle) &&
-          S_ISREG(st_oracle.st_mode) && (st_oracle.st_mode & 0111) &&
-          st_oracle.st_size >= 4)
+      if (!stat(cand_oracle, &st_oracle) && S_ISREG(st_oracle.st_mode) &&
+          (st_oracle.st_mode & 0111) && (f_len = st_oracle.st_size) >= 4)
       {
         oracle_path = cand_oracle;
-        oracle_found = 1;
-      }
-      else
-        ck_free(cand_oracle);
-
-      if (target_found && oracle_found)
         break;
+      }
+
+      ck_free(cand_oracle);
     }
 
-    if (!target_found)
-      FATAL("Program '%s' not found or not executable", target_name);
-    if (!oracle_found)
+    if (!oracle_path)
       FATAL("Program '%s' not found or not executable", oracle_name);
   }
 
@@ -7465,19 +7569,19 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
 
   /* Check for blatant user errors. */
 
-  if ((!strncmp(target_path, "/tmp/", 5) && !strchr(target_path + 5, '/')) ||
-      (!strncmp(target_path, "/var/tmp/", 9) && !strchr(target_path + 9, '/')))
+  if ((!strncmp(oracle_path, "/tmp/", 5) && !strchr(oracle_path + 5, '/')) ||
+      (!strncmp(oracle_path, "/var/tmp/", 9) && !strchr(oracle_path + 9, '/')))
     FATAL("Please don't keep binaries in /tmp or /var/tmp");
 
-  fd = open(target_path, O_RDONLY);
+  fd = open(oracle_path, O_RDONLY);
 
   if (fd < 0)
-    PFATAL("Unable to open '%s'", target_path);
+    PFATAL("Unable to open '%s'", oracle_path);
 
   f_data = mmap(0, f_len, PROT_READ, MAP_PRIVATE, fd, 0);
 
   if (f_data == MAP_FAILED)
-    PFATAL("Unable to mmap file '%s'", target_path);
+    PFATAL("Unable to mmap file '%s'", oracle_path);
 
   close(fd);
 
@@ -7485,7 +7589,7 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
   {
 
     SAYF("\n" cLRD "[-] " cRST
-         "Oops, the target binary looks like a shell script. Some build systems will\n"
+         "Oops, the binary looks like a shell script. Some build systems will\n"
          "    sometimes generate shell stubs for dynamically linked programs; try static\n"
          "    library mode (./configure --disable-shared) if that's the case.\n\n"
 
@@ -7494,18 +7598,18 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
          "    fuzzing process by a factor of 20x or more; it's best to write the wrapper\n"
          "    in a compiled language instead.\n");
 
-    FATAL("Program '%s' is a shell script", target_path);
+    FATAL("Program '%s' is a shell script", oracle_path);
   }
 
 #ifndef __APPLE__
 
   if (f_data[0] != 0x7f || memcmp(f_data + 1, "ELF", 3))
-    FATAL("Program '%s' is not an ELF binary", target_path);
+    FATAL("Program '%s' is not an ELF binary", oracle_path);
 
 #else
 
   if (f_data[0] != 0xCF || f_data[1] != 0xFA || f_data[2] != 0xED)
-    FATAL("Program '%s' is not a 64-bit Mach-O binary", target_path);
+    FATAL("Program '%s' is not a 64-bit Mach-O binary", oracle_path);
 
 #endif /* ^!__APPLE__ */
 
@@ -7514,7 +7618,7 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
   {
 
     SAYF("\n" cLRD "[-] " cRST
-         "Looks like the target binary is not instrumented! The fuzzer depends on\n"
+         "Looks like the binary is not instrumented! The fuzzer depends on\n"
          "    compile-time instrumentation to isolate interesting test cases while\n"
          "    mutating the input data. For more information, and for tips on how to\n"
          "    instrument binaries, please see %s/README.\n\n"
@@ -7528,18 +7632,6 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
 
     WARNF("No instrumentation detected");
   }
-
-  // if (qemu_mode &&
-  //     memmem(f_data, f_len, SHM_ENV_VAR, strlen(SHM_ENV_VAR) + 1)) {
-
-  //   SAYF("\n" cLRD "[-] " cRST
-  //        "This program appears to be instrumented with afl-gcc, but is being run in\n"
-  //        "    QEMU mode (-Q). This is probably not what you want - this setup will be\n"
-  //        "    slow and offer no practical benefits.\n");
-
-  //   FATAL("Instrumentation found in -Q mode");
-
-  // }
 
   if (memmem(f_data, f_len, "libasan.so", 10) ||
       memmem(f_data, f_len, "__msan_init", 11))
@@ -7572,14 +7664,7 @@ EXP_ST void check_binary(u8 *target_name, u8 *oracle_name)
 
     WARNF("AFL_DEFER_FORKSRV is no longer supported and may misbehave!");
   }
-  if (strcmp(target_path, oracle_path) == 0)
-  {
-    FATAL("Target binary and oracle binary are the same. Please specify different binaries.");
-  }
-  else
-  {
-    WARNF("Target binary and oracle binary are different %s and %s.", target_path, oracle_path);
-  }
+
   if (munmap(f_data, f_len))
     PFATAL("unmap() failed");
 }
@@ -8624,7 +8709,8 @@ int main(int argc, char **argv)
   if (!out_file)
     setup_stdio_file();
 
-  check_binary(argv[optind], argv[optind + 1]);
+  setup_env_files();
+  check_binary(argv[optind]);
 
   start_time = get_cur_time();
 
@@ -8765,7 +8851,7 @@ stop_fuzzing:
   fclose(plot_file);
   destroy_queue();
   destroy_extras();
-  ck_free(target_path);
+  ck_free(oracle_path);
   ck_free(sync_id);
 
   alloc_report();

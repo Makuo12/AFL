@@ -151,7 +151,6 @@ elif [[ "$(uname -s)" == "Linux" ]]; then
             $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     fi
-    cp  $wrap/output/main.oracle $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass.
 else
     echo "Unknown OS: $(uname -s)"
     exit 1
