@@ -4805,6 +4805,85 @@ static void truncate_file(const u8 *path)
     fclose(f);
 }
 
+static u32 count_lines(const u8 *path)
+{
+  FILE *f = fopen(path, "r");
+  int c;
+  u32 n = 0;
+
+  if (!f)
+    return 0;
+  while ((c = fgetc(f)) != EOF)
+    if (c == '\n')
+      n++;
+  fclose(f);
+  return n;
+}
+
+/* Count trap call sites in the IR by metadata kind. In textual IR each one
+   is written as "!<kind> !<n>" on the call. Also prints the change since the
+   previous call, so each rebuild shows how much it removed. */
+static void log_trap_counts(const u8 *ll, const u8 *when)
+{
+  static const char *kinds[] = {"block_id", "else_block_id", "invoke_block_id",
+                                "default_block_id", "loop_header_id"};
+  static u64 prev_total;
+
+  struct stat st;
+  s32 fd = open(ll, O_RDONLY);
+  u8 *mem;
+  u64 total = 0;
+  u32 i;
+
+  if (fd < 0 || fstat(fd, &st) || !st.st_size)
+  {
+    WARNF("trap counts: cannot read '%s'", ll);
+    if (fd >= 0)
+      close(fd);
+    return;
+  }
+
+  mem = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+
+  if (mem == MAP_FAILED)
+  {
+    WARNF("trap counts: cannot mmap '%s'", ll);
+    return;
+  }
+
+  OKF("Trap counts %s:", when);
+
+  for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++)
+  {
+    u8 *pat = alloc_printf("!%s !", kinds[i]);
+    size_t plen = strlen(pat);
+    u8 *p = mem;
+    size_t left = st.st_size;
+    u64 n = 0;
+
+    while ((p = memmem(p, left, pat, plen)))
+    {
+      n++;
+      p += plen;
+      left = (mem + st.st_size) - p;
+    }
+
+    SAYF("    %-18s %llu\n", kinds[i], n);
+    total += n;
+    ck_free(pat);
+  }
+
+  if (prev_total)
+    SAYF("    %-18s %llu (removed %llu since last)\n", "total", total,
+         prev_total - total);
+  else
+    SAYF("    %-18s %llu\n", "total", total);
+
+  prev_total = total;
+  munmap(mem, st.st_size);
+}
+
 /* Returns 0 on success, -1 on failure (live files untouched). */
 static int remove_instrumentation(void)
 {
@@ -4890,6 +4969,10 @@ static int remove_instrumentation(void)
     WARNF("de-instrumentation: commit failed: %s", strerror(errno));
     goto out;
   }
+
+  OKF("Retired ids: %u, threshold lines: %u", count_lines(meta_data_file),
+      count_lines(loop_threshold_file));
+  log_trap_counts(main_transformed_ll, "after de-instrumentation");
 
   /* Everything in these is baked into the new IR now. */
   truncate_file(meta_data_file);
@@ -8631,6 +8714,7 @@ int main(int argc, char **argv)
     setup_stdio_file();
 
   setup_env_files();
+  log_trap_counts(main_transformed_ll, "at start");
   check_binary(argv[optind]);
 
   start_time = get_cur_time();

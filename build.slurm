@@ -92,6 +92,18 @@ llvm-dis $wrap/output/out.bc -o $wrap/output/out.ll
 echo "Make target init"
 $BIN_PATH/clang -I $wrap/include -c -emit-llvm $wrap/wrapper/fuzzer.c -o $wrap/output/fuzzer.bc
 
+# Count trap call sites in an .ll, by metadata kind.
+count_traps() {
+    local ll="$1" label="$2" k n total=0
+    echo "[$label] trap counts in $(basename "$ll"):"
+    for k in block_id else_block_id invoke_block_id default_block_id loop_header_id; do
+        n=$(grep -o "!${k} !" "$ll" | wc -l)
+        printf "    %-18s %s\n" "$k" "$n"
+        total=$((total + n))
+    done
+    echo "    total              $total"
+}
+
 echo "Building edge-only binary"
 $BIN_PATH/clang++ $wrap/src/EdgeCount.cc $wrap/src/EdgeHandler.cc \
     $wrap/src/PCTable.cc $wrap/src/Instrumentation.cc   \
@@ -109,6 +121,8 @@ $wrap/output/edge "$wrap/output/out.ll" "$wrap/output/main.transformed.ll"
 # Fail early if the pass did not tag any globals.
 grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
     || { echo "ERROR: pass did not tag any globals"; exit 1; }
+
+count_traps "$wrap/output/main.transformed.ll" "build"
 
 # Runtime sources are compiled as C (-x c) so the --wrap symbols and the
 # __real_* declarations keep plain C names.
