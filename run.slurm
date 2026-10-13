@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=improving_afl_run
+#SBATCH --job-name=de_edge_afl_run
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
 #SBATCH --constraint=intel
@@ -25,7 +25,7 @@ export AFL_NO_SYNC=1                    # don't import other instances' inputs
 FUZZ_SECONDS=$((24*60*60))
 TRACE="main.trace"
 ORACLE="main.oracle"
-PROGRAM="improving_afl"
+PROGRAM="de_edge_afl"
 
 
 if [[ "${1:-}" = "arc" ]]; then
@@ -34,8 +34,8 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0}"
     FULL_ID="${PROGRAM}_${ID}"
 
-    wrap="$HOME/improving/AFL"      # same as build
-    runner="$wrap/improving_runner"
+    wrap="$HOME/de_edge/AFL"      # same as build
+    runner="$wrap/de_edge_runner"
     mkdir -p "$runner"
 
     output="$runner/output_${ID}"                # per-task copy
@@ -44,17 +44,28 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     cp -r "$wrap/output/." "$output/"      # everything: binaries, .bc, .ll, edge, remove_edge, ...
 
     tmp_base="${TMPDIR:-/tmp}"
-    tmp_input="$tmp_base/improving_${FULL_ID}"
+    tmpfs_base="${TMPFS:-/tmp}"
+    
+
+    tmp_input="$tmp_base/de_edge_${FULL_ID}"
     OUTROOT="$tmp_base/$FULL_ID"            # node-local fuzzer output (wiped at job end)
     RESULTS_DIR="$output/results"             # persistent results
-    export LOOP_THRESHOLD_FILE="$OUTROOT/loop_threshold.txt"
     SUT_ORACLE="$output/$ORACLE"
     SUT_TRACE="$output/$TRACE"
     SUT_ARGS=(@@ /dev/null)
-    export LOG_FILE="$OUTROOT/fuzzer_log_file"
-    mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR"
+    
+    FASTROOT="$tmpfs_base/$FULL_ID"            # node-local fuzzer output (wiped at job end)
+
+    mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR" "$FASTROOT"
     cp -rf "$wrap/testcases/pdf/." "$tmp_input/"
     SEED_DIR="$tmp_input"
+    # For meta_data and threshold
+
+    export LOG_FILE="$OUTROOT/fuzzer_log_file"
+    export LOOP_THRESHOLD_FILE="$FASTROOT/fuzzer_loop_threshold.txt"
+    export META_DATA_FILE="$FASTROOT/fuzzer_meta_data.txt"
+    export OUTPUT_HOME="$output"
+    export DE_EDGE_MAX=4000 # This holds the max for edges to now de-instrument
 
     [ -d "$SEED_DIR" ] || { echo "Missing seed dir: $SEED_DIR" >&2; exit 1; }
     [ -x "$SUT_ORACLE" ] || { echo "Missing oracle: $SUT_ORACLE" >&2; exit 1; }
@@ -65,14 +76,14 @@ else
     wrap=$(pwd)
 
     ID="local_$(date +%s)_$$"
-    FULL_ID="${PROGRAM:-improving}_${ID}"
+    FULL_ID="${PROGRAM:-de_edge}_${ID}"
 
-    output="$wrap/output_$ID"
+    output="$wrap/de_edge_output_$ID"
     mkdir -p "$output"
     cp -r "$wrap/output/." "$output/"
 
     tmp_base="/tmp"
-    tmp_input="$tmp_base/improving_${FULL_ID}"
+    tmp_input="$tmp_base/de_edge_${FULL_ID}"
     OUTROOT="$tmp_base/$FULL_ID"
     RESULTS_DIR="$output/results"
 

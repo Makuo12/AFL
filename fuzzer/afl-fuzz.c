@@ -103,6 +103,11 @@ EXP_ST u8 *in_dir, /* Input directory with test cases  */
     *target_path,  /* Path to target binary            */
     *oracle_path,  /* Path to target binary            */
     *orig_cmdline; /* Original command line            */
+    *remove_edge_bin;
+    *meta_data_file;
+    *loop_threshold_file;
+    *main_transformed_ll;
+    *fuzzer_bc;
 
 Trace *trap_addr;
 
@@ -238,6 +243,9 @@ static u64 total_bitmap_size, /* Total bit count for all bitmaps  */
     total_bitmap_entries;     /* Number of bitmaps counted        */
 
 static s32 cpu_core_count; /* CPU core count                   */
+
+static u32 DE_EDGE_COUNT;
+static u32 DE_EDGE_LOOP_COUNT;
 
 #ifdef HAVE_AFFINITY
 
@@ -756,114 +764,6 @@ static u8 *DTD(u64 cur_ms, u64 event_ms)
 
   sprintf(tmp, "%s days, %u hrs, %u min, %u sec", DI(t_d), t_h, t_m, t_s);
   return tmp;
-}
-
-static LoopThresholdEntry *loop_threshold_map = NULL;
-
-static const char *loop_threshold_path(void)
-{
-  const char *p = getenv("LOOP_THRESHOLD_FILE");
-  return p ? p : "./output/loop_thresholds.txt";
-}
-
-/* Insert or raise the threshold. Thresholds only grow, so a stale/lower
-   value never overwrites a newer one. */
-static void loop_threshold_set(int32_t meta_id, int32_t cmp_value)
-{
-
-  LoopThresholdEntry *entry = NULL;
-
-  HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
-
-  if (!entry)
-  {
-    entry = ck_alloc(sizeof(*entry)); /* was malloc, uninitialised */
-    entry->meta_id = meta_id;
-    entry->cmp_value = cmp_value;
-    HASH_ADD_INT(loop_threshold_map, meta_id, entry);
-  }
-  else if (cmp_value > entry->cmp_value)
-  {
-    entry->cmp_value = cmp_value;
-  }
-}
-
-/* Returns the stored threshold, or 0 with *found = 0 if unknown. */
-static int32_t loop_threshold_get(int32_t meta_id, int *found)
-{
-
-  LoopThresholdEntry *entry = NULL;
-
-  HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
-  if (found)
-    *found = entry != NULL;
-  return entry ? entry->cmp_value : 0;
-}
-
-/* Retired id: drop it so the map doesn't hold dead entries. */
-static void loop_threshold_remove(int32_t meta_id)
-{
-
-  LoopThresholdEntry *entry = NULL;
-
-  HASH_FIND_INT(loop_threshold_map, &meta_id, entry);
-  if (entry)
-  {
-    HASH_DEL(loop_threshold_map, entry);
-    ck_free(entry);
-  }
-}
-
-static void loop_threshold_clear(void)
-{
-
-  LoopThresholdEntry *entry, *tmp;
-
-  HASH_ITER(hh, loop_threshold_map, entry, tmp)
-  {
-    HASH_DEL(loop_threshold_map, entry);
-    ck_free(entry);
-  }
-
-  loop_threshold_map = NULL;
-}
-
-/* Snapshot as "id,cmp_value" lines. Written to a temp file and renamed so the
-   LLVM pass never reads a half-written file. */
-static void loop_threshold_dump(void)
-{
-
-  const char *path = loop_threshold_path();
-  u8 *tmp_path = alloc_printf("%s.tmp", path);
-  FILE *fp = fopen(tmp_path, "w");
-  LoopThresholdEntry *entry, *tmp;
-
-  if (!fp)
-    PFATAL("Unable to open '%s'", tmp_path);
-
-  HASH_ITER(hh, loop_threshold_map, entry, tmp)
-  fprintf(fp, "%d,%d\n", entry->meta_id, entry->cmp_value);
-
-  if (fclose(fp))
-    PFATAL("Unable to write '%s'", tmp_path);
-  if (rename(tmp_path, path))
-    PFATAL("Unable to rename '%s'", tmp_path);
-
-  ck_free(tmp_path);
-}
-
-/* Reload a previous snapshot (resume). Missing file is fine. */
-static void loop_threshold_load(void)
-{
-
-  FILE *fp = fopen(loop_threshold_path(), "r");
-  int id, cmp;
-
-  if (!fp)
-    return;
-  while (fscanf(fp, "%d,%d\n", &id, &cmp) == 2)
-    loop_threshold_set(id, cmp);
-  fclose(fp);
 }
 
 /* Mark deterministic checks as done for a particular queue entry. We use the
@@ -2620,25 +2520,6 @@ static void write_with_gap(void *mem, u32 len, u32 skip_at, u32 skip_len)
   }
   else
     close(fd);
-}
-
-static void write_meta_indices(void)
-{
-
-  u8 *fn = alloc_printf("%s/meta_indices", out_dir);
-  FILE *f = fopen(fn, "w");
-  ck_free(fn);
-
-  if (!f)
-    return; /* non-critical, don't PFATAL */
-
-  MetaIndex *cur, *tmp;
-  HASH_ITER(hh, meta_indices, cur, tmp)
-  {
-    fprintf(f, "%d\n", cur->index);
-  }
-
-  fclose(f);
 }
 
 static void show_stats(void);
@@ -4938,6 +4819,78 @@ abort_trimming:
   return fault;
 }
 
+static int run(char *const argv[])
+{
+  pid_t pid = fork();
+  if (pid < 0)
+  {
+    perror("fork");
+    return -1;
+  }
+  if (pid == 0)
+  {
+    execvp(argv[0], argv);
+    perror(argv[0]);
+    _exit(127); // never exit() in a forked child
+  }
+
+  int status;
+  if (waitpid(pid, &status, 0) < 0)
+  {
+    perror("waitpid");
+    return -1;
+  }
+
+  if (WIFSIGNALED(status))
+  {
+    int sig = WTERMSIG(status);
+    fprintf(stderr, "%s terminated by signal %d (%s)%s\n", argv[0], sig,
+            strsignal(sig), WCOREDUMP(status) ? " -- core dumped" : "");
+    return -1;
+  }
+  return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+}
+
+
+// Layout assumed by this function (matches build.sh):
+//   p->transformed_ll : main.transformed.ll, the instrumented program ONLY
+//                       (the fuzzer runtime is NOT linked into it)
+//   p->wrapper_bc     : fuzzer.bc, linked in at this relink step
+// The relink uses the same codegen-only flags as FINAL_FLAGS in build.sh
+// (-O3 backend, IR passes disabled) so the remaining traps are not reshaped.
+void remove_instrumentation()
+{
+
+      char *stage1[] = {remove_edge_bin, "-i", main_transformed_ll,
+                        "-m", meta_data_file, "-o", main_transformed_ll,
+                        "-l", loop_threshold_file, NULL};
+
+
+  char image_base_arg[64];
+  RUNTIME = "-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/heap_track_oa.c -x none"
+
+#File - handle wrappers(filer.c)
+      FILE_WRAP_FLAGS = "-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
+                 -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
+
+#Heap wrappers(heap_track_oa.c)
+      MEM_WRAP_FLAGS = "-Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free \
+                -Wl,--wrap=reallocarray -Wl,--wrap=memalign -Wl,--wrap=aligned_alloc \
+                -Wl,--wrap=posix_memalign -Wl,--wrap=valloc -Wl,--wrap=pvalloc \
+                -Wl,--wrap=strdup -Wl,--wrap=strndup \
+                -Wl,--wrap=getline -Wl,--wrap=getdelim"
+stage to should re-build main.oracle 
+
+      if (run(stage1) != 0 || run(stage2) != 0)
+  {
+    fprintf(stderr, "de-instrumentation failed\n");
+    exit(EXIT_FAILURE); // atexit cleans up shm in the parent
+  }
+  FILE *f = fopen(p->meta_data, "w");
+  if (f)
+    fclose(f);
+}
+
 /* Write a modified test case, run program, process results. Handle
    error conditions, returning 1 if it's time to bail out. This is
    a helper function for fuzz_one(). */
@@ -4989,8 +4942,13 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len)
 
   queued_discovered += save_if_interesting(argv, out_buf, len, fault);
 
+  DE_EDGE_COUNT+=trace_bits[0];
+  DE_EDGE_LOOP_COUNT+=trace_bits[3];
+
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
+
+    de
 
   return 0;
 }
@@ -7378,6 +7336,32 @@ static void handle_timeout(int sig)
     child_timed_out = 1;
     kill(forksrv_pid, SIGKILL);
   }
+}
+
+EXP_ST void setup_env_files(){
+  char *output_home = getenv("OUTPUT_HOME");
+  if (!output_home || strlen(output_home) < 1) {
+    exit(EXIT_FAILURE);
+  }
+  char *env_meta_file = getenv("META_DATA_FILE");
+  if (!env_meta_file || strlen(env_meta_file) < 1) {
+    exit(EXIT_FAILURE);
+  }
+  meta_data_file = ck_strdup(env_meta_file);
+  if (!meta_data_file) {
+    exit(EXIT_FAILURE);
+  }
+  char *env_loop_threshold_file = getenv("LOOP_THRESHOLD_FILE");
+  if (!env_loop_threshold_file || strlen(env_loop_threshold_file) < 1) {
+    exit(EXIT_FAILURE);
+  }
+  loop_threshold_file = ck_strdup(env_loop_threshold_file);
+  if (!loop_threshold_file) {
+    exit(EXIT_FAILURE);
+  }
+  main_transformed_ll = alloc_printf("%s/main.transformed.ll", output_home);
+  remove_edge_bin = alloc_printf("%s/remove_edge", output_home);
+  remove_edge_bin = alloc_printf("%s/fuzzer.bc", output_home);
 }
 
 /* Do a PATH search and find target binary to see that it exists and

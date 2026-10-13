@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=improving_afl_build
+#SBATCH --job-name=de_edge_afl_build
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
 #SBATCH --constraint=intel
@@ -18,7 +18,7 @@ if [ "${1:-}" = "arc" ]; then
     module load GCCcore/14.3.0
     pip install --user wllvm
     export PATH="$HOME/.local/bin:$PATH"
-    wrap="$HOME/improving/AFL"
+    wrap="$HOME/de_edge/AFL"
     export BASE_ADDRESS=0x400000
 else
     export LLVM_CC_NAME=clang-20        # ← pin to version 20

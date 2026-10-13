@@ -18,90 +18,6 @@ std::unique_ptr<Module> parseFile(const char *filename, SMDiagnostic &Err, LLVMC
     return M;
 }
 
-void removeSwitchFallthroughInstrumentation(unordered_set<int32_t> &metaIds, std::vector<CallInst *> &traps)
-{
-    SmallPtrSet<BasicBlock *, 16> toCheck;
-    for (CallInst *Trap : traps)
-    {
-        if (!Trap->getParent())
-        {
-            errs() << "[deinstr] ERROR: fallthrough trap instruction is no longer attached "
-                      "to a basic block; skipping\n";
-            continue;
-        }
-        BasicBlock *BB = Trap->getParent();
-        BasicBlock *CaseBB = BB->getUniquePredecessor();
-
-        if (!CaseBB)
-        {
-            errs() << "[deinstr] ERROR: block '" << BB->getName()
-                   << "' has no unique predecessor - not touching it\n";
-            assert(false && "trap/direct block must have exactly one predecessor "
-                            "(the CaseBB with the conditional branch)");
-            continue;
-        }
-
-        neutralizeBlock(Trap);
-
-        if (!isNeutralized(BB))
-        {
-            errs() << "[deinstr] ERROR: '" << BB->getName()
-                   << "' failed to neutralize (postcondition failed)\n";
-            assert(false && "neutralizeBlock postcondition failed: "
-                            "block is not a single unconditional br");
-        }
-
-        toCheck.insert(CaseBB);
-    }
-
-    SmallVector<PHINode *, 8> preservedEntryPhis;
-    for (BasicBlock *CaseBB : toCheck)
-    {
-        auto *CondBr = dyn_cast_or_null<BranchInst>(CaseBB->getTerminator());
-        if (!CondBr || !CondBr->isConditional())
-            continue; // already collapsed, or unexpected shape - not an error
-
-        BasicBlock *TrapBB = CondBr->getSuccessor(0);
-        BasicBlock *DirectBB = CondBr->getSuccessor(1);
-
-        if (isNeutralized(TrapBB) && isNeutralized(DirectBB))
-            collapseFallthroughSite(CaseBB, preservedEntryPhis);
-    }
-
-    // Fixpoint sweep: a preserved .entry PHI can lose its last user later
-    // in this same pass (its downstream consumer got collapsed too), which
-    // can in turn free up something further upstream.
-    bool changed = true;
-    while (changed)
-    {
-        changed = false;
-        for (auto it = preservedEntryPhis.begin(); it != preservedEntryPhis.end();)
-        {
-            if ((*it)->use_empty())
-            {
-                (*it)->eraseFromParent();
-                it = preservedEntryPhis.erase(it);
-                changed = true;
-            }
-            else
-                ++it;
-        }
-    }
-
-    // Final sanity check: catch any dangling-use / dominance breakage from
-    // this pass immediately, with a clear culprit, instead of surfacing as
-    // a confusing crash three passes later.
-    // std::string errMsg;
-    // raw_string_ostream OS(errMsg);
-    // if (verifyFunction(F, &OS))
-    // {
-    //     errs() << "[deinstr] FUNCTION VERIFICATION FAILED after deinstrumenting '"
-    //            << F.getName() << "':\n"
-    //            << OS.str();
-    //     assert(false && "removeSwitchFallthroughInstrumentation produced invalid IR");
-    // }
-}
-
 void removeDefaultBlockInstrumentation(unordered_set<int32_t> &metaIds, std::vector<CallInst *> &traps)
 {
     for (CallInst *Trap : traps)
@@ -166,96 +82,57 @@ void findTrapInstructions(
     unordered_map<int32_t, int32_t> &thresholds,
     std::vector<CallInst *> &elseArmTraps,
     std::vector<CallInst *> &defaultSwitchTraps,
-    std::vector<CallInst *> &fellthroughSwitchTraps,
     std::vector<CallInst *> &invokeTraps,
     std::vector<CallInst *> &loopCountTraps,
     std::vector<CallInst *> &blockTraps,
     std::vector<CallInst *> &allLoopCountTraps)
 {
-    // Estimate upper bound based on instruction count to avoid dynamic reallocations
-    set<int64_t> inIds;
-    set <int64_t> loopIds;
+    auto getId = [](MDNode *MD) -> int32_t
+    {
+        return (int32_t)mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
+    };
+
     for (Function &F : M)
     {
         for (Instruction &I : instructions(F))
         {
-            if (auto *CI = dyn_cast<CallInst>(&I))
+            auto *CI = dyn_cast<CallInst>(&I);
+            if (!CI)
+                continue;
+
+            if (MDNode *MD = CI->getMetadata("else_block_id"))
             {
-                if (MDNode *MD = CI->getMetadata("else_block_id"))
-                {
-                    int64_t id = mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
-                    inIds.insert(id);
-                    if (metaIds.find(id) != metaIds.end())
-                        elseArmTraps.emplace_back(CI);
-                }
-                else if (MDNode *MD = CI->getMetadata("invoke_block_id"))
-                {
-                    int64_t id = mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
-                    inIds.insert(id);
-                    if (metaIds.find(id) != metaIds.end())
-                        invokeTraps.emplace_back(CI);
-                }
-                else if (MDNode *MD = CI->getMetadata("switch_fallthrough_id"))
-                {
-                    int64_t id = mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
-                    inIds.insert(id);
-                    if (metaIds.find(id) != metaIds.end())
-                        fellthroughSwitchTraps.emplace_back(CI);
-                }
-                else if (MDNode *MD = CI->getMetadata("default_block_id"))
-                {
-                    int64_t id = mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
-                    inIds.insert(id);
-                    if (metaIds.find(id) != metaIds.end())
-                        defaultSwitchTraps.emplace_back(CI);
-                }
-                else if (MDNode *MD = CI->getMetadata("loop_header_id"))
-                {
-                    int64_t id = mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
-                    inIds.insert(id);
-                    loopIds.insert(id);
-                    // Unconditionally record EVERY loop trap here, regardless
-                    // of metaIds membership, so applyLoopThresholds() below
-                    // can find and patch the ones that are still active
-                    // (i.e. NOT in metaIds -- those get fully removed instead
-                    // by removeLoopInstrumentation).
-                    if (thresholds.find(id) != thresholds.end()) {
-                        allLoopCountTraps.emplace_back(CI);
-                    }
-                    if (metaIds.find(id) != metaIds.end())
-                        loopCountTraps.emplace_back(CI);
-                }
-                else if (MDNode *MD = CI->getMetadata("block_id"))
-                {
-                    int64_t id = mdconst::extract<ConstantInt>(MD->getOperand(0))->getSExtValue();
-                    inIds.insert(id);
-                    if (metaIds.find(id) != metaIds.end())
-                        blockTraps.emplace_back(CI);
-                }
+                if (metaIds.count(getId(MD)))
+                    elseArmTraps.emplace_back(CI);
+            }
+            else if (MDNode *MD = CI->getMetadata("invoke_block_id"))
+            {
+                if (metaIds.count(getId(MD)))
+                    invokeTraps.emplace_back(CI);
+            }
+            else if (MDNode *MD = CI->getMetadata("default_block_id"))
+            {
+                if (metaIds.count(getId(MD)))
+                    defaultSwitchTraps.emplace_back(CI);
+            }
+            else if (MDNode *MD = CI->getMetadata("loop_header_id"))
+            {
+                int32_t id = getId(MD);
+                // Live loops that have a saved threshold: candidates for
+                // applyLoopThresholds().
+                if (thresholds.count(id))
+                    allLoopCountTraps.emplace_back(CI);
+                // Retired loops: removed by removeLoopInstrumentation().
+                if (metaIds.count(id))
+                    loopCountTraps.emplace_back(CI);
+            }
+            else if (MDNode *MD = CI->getMetadata("block_id"))
+            {
+                if (metaIds.count(getId(MD)))
+                    blockTraps.emplace_back(CI);
             }
         }
     }
-    // errs() << "meta_id not found: ";
-    // for (int32_t id: metaIds) {
-    //     if (inIds.find(id) == inIds.end()) {
-    //         errs() << id << ", ";
-    //     }
-    // }
-    // errs() << ",\n";
-    // errs() << "thresholds: ";
-    // for (auto item: thresholds) {
-    //     errs() << item.first << ", ";
-    //     if (inIds.find(item.first) == inIds.end()) {
-    //         errs() << "loop_ids special not found: " << item.first << "\n";
-    //     }
-    // }
-    // errs() << ",\n";
-    // for (auto item: thresholds) {
-    //     if (loopIds.find(item.first) == loopIds.end()) {
-    //         errs() << "loop_count special not found: " << item.first << "\n";
-    //     }
-    // }
-
 }
 
 void removeIfEdgeInstrumentation(unordered_set<int32_t> &metaIds, std::vector<CallInst *> &traps)
@@ -475,12 +352,16 @@ void removeLoopInstrumentation(unordered_set<int32_t> &metaIds, std::vector<Call
  * remove_instrumentation().
  */
 
-void loadThresholds(unordered_map<int32_t, int32_t> &thresholds, string &thresholdFile)
+// Threshold file: "id,cmp_value" lines, appended by the harness on every
+// bump. Thresholds only grow, so keep the max per id. Ids present in the
+// meta file are retired loops and get no threshold.
+void loadThresholds(unordered_set<int32_t> &metaIds,
+                    unordered_map<int32_t, int32_t> &thresholds,
+                    string &thresholdFile)
 {
     if (thresholdFile.empty())
-    {
         return; // no threshold file provided -- nothing to restore, not an error
-    }
+
     ifstream file(thresholdFile);
     if (!file)
     {
@@ -488,26 +369,35 @@ void loadThresholds(unordered_map<int32_t, int32_t> &thresholds, string &thresho
                << thresholdFile << "' -- proceeding with no threshold restoration\n";
         return;
     }
+
     string line;
-    int32_t id;
-    int32_t cmp_value;
     int lineNo = 0;
     while (getline(file, line))
     {
         ++lineNo;
+        // Possibly-truncated last line (no trailing '\n'): "12,6" from "12,64"
+        // would parse fine and give a wrong, too-low value.
+        if (file.eof())
+            break;
         if (line.empty())
             continue;
-        int parsed = sscanf(line.data(), "%d,%d", &id, &cmp_value);
-        if (parsed != 2)
+
+        int32_t id = 0, cmp_value = 0;
+        if (sscanf(line.c_str(), "%d,%d", &id, &cmp_value) != 2)
         {
             errs() << "[deinstr] [thresholds] WARNING: malformed line " << lineNo
                    << " ('" << line << "') -- skipping\n";
             continue;
         }
-        thresholds[id] = cmp_value;
+
+        if (metaIds.count(id) != 0)
+            continue; // retired: nothing to bake in
+
+        auto it = thresholds.find(id);
+        if (it == thresholds.end() || it->second < cmp_value)
+            thresholds[id] = cmp_value;
     }
 }
-
 // Rewrites only the imm32 of the forced-imm32 "cmp eax, imm32" inside an
 // existing loop-guard asm string:
 //     ".byte 0x3d, 0x01, 0x00, 0x00, 0x00\n\t"
@@ -694,8 +584,17 @@ void loadData(unordered_set<int32_t> &metaIds, string &metaFile)
     string line;
     while (getline(file, line))
     {
-        int32_t value = std::atoi(line.data());
-        metaIds.insert(value);
+        // getline sets eofbit when the last line has no trailing '\n'.
+        // The harness always writes '\n', so such a line is truncated.
+        if (file.eof())
+            break;
+        if (line.empty())
+            continue;
+        char *end = nullptr;
+        long v = strtol(line.c_str(), &end, 10);
+        if (end == line.c_str() || *end != '\0')
+            continue;
+        metaIds.insert(static_cast<int32_t>(v));
     }
 }
 
@@ -759,15 +658,14 @@ int main(int argc, char **argv)
     unordered_set<int32_t> metaIds;
     loadData(metaIds, metaFile);
     unordered_map<int32_t, int32_t> thresholds;
-    loadThresholds(thresholds, thresholdFile);
+    loadThresholds(metaIds, thresholds, thresholdFile);
     std::vector<CallInst *> elseArmTraps;
     std::vector<CallInst *> defaultSwitchTraps;
-    std::vector<CallInst *> fellthroughSwitchTraps;
     std::vector<CallInst *> invokeTraps;
     std::vector<CallInst *> loopCountTraps;
     std::vector<CallInst *> blockTraps;
     std::vector<CallInst *> allLoopCountTraps;
-    findTrapInstructions(*M, metaIds, thresholds, elseArmTraps, defaultSwitchTraps, fellthroughSwitchTraps, invokeTraps, loopCountTraps, blockTraps, allLoopCountTraps);
+    findTrapInstructions(*M, metaIds, thresholds, elseArmTraps, defaultSwitchTraps, invokeTraps, loopCountTraps, blockTraps, allLoopCountTraps);
     if (!thresholds.empty()) {
         applyLoopThresholds(thresholds, metaIds, allLoopCountTraps);
     }
