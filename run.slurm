@@ -35,7 +35,6 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     FULL_ID="${PROGRAM}_${ID}"
 
     wrap="$HOME/improving/AFL"      # same as build
-    cd "$wrap"                                   # makes ./fuzzer/afl-fuzz and ./output work
     runner="$wrap/improving_runner"
     mkdir -p "$runner"
 
