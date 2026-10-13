@@ -55,9 +55,7 @@ extern const struct mach_header_64 _mh_execute_header;
 extern int target_main(int argc, char **argv);
 extern void __reset_loop_counters(void);
 
-extern void __untracer_setup_global(void);   /* globals snapshot */
-extern void __untracer_restore_global(void); /* globals restore */
-extern void __untracer_snapshot_fds(void);   /* file-handle tracker */
+extern void __untracer_snapshot_fds(void); /* file-handle tracker */
 extern void close_open_file_handles(void);
 extern void __untracer_heap_start(void); /* heap tracker */
 extern void free_open_heap(void);
