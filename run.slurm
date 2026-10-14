@@ -2,7 +2,7 @@
 #SBATCH --job-name=improving_afl_run
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
-#SBATCH --constraint=intel
+#SBATCH --nodelist=tc-intel012
 #SBATCH --time=25:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
@@ -12,6 +12,9 @@
 #SBATCH --array=1-5
 
 set -euo pipefail
+
+echo "node=$(hostname -s) cpu=$(lscpu | grep 'Model name' | sed 's/.*: *//')"
+
 export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 export AFL_SKIP_CPUFREQ=1
 export AFL_NO_UI=1
