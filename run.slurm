@@ -6,10 +6,10 @@
 #SBATCH --time=25:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4G
+#SBATCH --mem-per-cpu=8G
 #SBATCH --output=./logs/fuzz-%j.log
 #SBATCH --error=./logs/fuzz-%j.log
-#SBATCH --array=1-1
+#SBATCH --array=1-5
 
 set -euo pipefail
 export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
@@ -22,7 +22,7 @@ export AFL_DISABLE_TRIM=1
 export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
 export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
-FUZZ_SECONDS=$((6*60*60))
+FUZZ_SECONDS=$((24*60*60))
 ORACLE="main.oracle"
 PROGRAM="de_edge_afl"
 
@@ -63,7 +63,7 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     export LOOP_THRESHOLD_FILE="$FASTROOT/fuzzer_loop_threshold.txt"
     export META_DATA_FILE="$FASTROOT/fuzzer_meta_data.txt"
     export OUTPUT_HOME="$output"
-    export DE_EDGE_MAX=4000 # new edges + loop buckets before we de-instrument
+    export DE_EDGE_MAX=2000 # new edges + loop buckets before we de-instrument
     export DE_EDGE_ARC=1    # relink with bfd + image-base like build.slurm
     export WRAP_HOME="$wrap"
     export CLANGXX="$(llvm-config --bindir)/clang++"
@@ -108,10 +108,10 @@ fi
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 5000 -m 2048 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 4096 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 5000 -m 2048 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 4096 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 
