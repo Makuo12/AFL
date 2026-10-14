@@ -4970,9 +4970,9 @@ static int remove_instrumentation(void)
     goto out;
   }
 
-  OKF("Retired ids: %u, threshold lines: %u", count_lines(meta_data_file),
-      count_lines(loop_threshold_file));
-  log_trap_counts(main_transformed_ll, "after de-instrumentation");
+  // OKF("Retired ids: %u, threshold lines: %u", count_lines(meta_data_file),
+  //     count_lines(loop_threshold_file));
+  // log_trap_counts(main_transformed_ll, "after de-instrumentation");
 
   /* Everything in these is baked into the new IR now. */
   truncate_file(meta_data_file);
@@ -8714,7 +8714,7 @@ int main(int argc, char **argv)
     setup_stdio_file();
 
   setup_env_files();
-  log_trap_counts(main_transformed_ll, "at start");
+  // log_trap_counts(main_transformed_ll, "at start");
   check_binary(argv[optind]);
 
   start_time = get_cur_time();
