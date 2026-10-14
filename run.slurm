@@ -6,9 +6,9 @@
 #SBATCH --time=25:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=8G
-#SBATCH --output=./logs/improving-fuzz-%j.log
-#SBATCH --error=./logs/improving-fuzz-%j.log
+#SBATCH --mem-per-cpu=4G
+#SBATCH --output=./logs/fuzz-%j.log
+#SBATCH --error=./logs/fuzz-%j.log
 #SBATCH --array=1-5
 
 set -euo pipefail
@@ -93,10 +93,10 @@ fi
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 5000 -m 4096 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 2048 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 5000 -m 4096 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 2048 -- "$SUT_TRACE" "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 
