@@ -7,8 +7,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=8G
-#SBATCH --output=./logs/fuzz-%j.log
-#SBATCH --error=./logs/fuzz-%j.log
+#SBATCH --output=./logs/improving-fuzz-%j.log
+#SBATCH --error=./logs/improving-fuzz-%j.log
 #SBATCH --array=1-5
 
 set -euo pipefail
