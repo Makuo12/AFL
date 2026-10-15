@@ -178,15 +178,27 @@ void insertCounterGuard(BasicBlock *HeaderBB, GlobalVariable *CounterArr,
     // $0 = address of this loop's counter slot, passed in a GPR.
     // ".byte 0x3d,0x01,0x00,0x00,0x00" == "cmp eax, 1" forced to imm32
     // (5 bytes) rather than the compact form the assembler would pick.
+    //
+    // Label "1" is already used by this template for the jle target
+    // (post-trap landing point), so the trap's own bookmark uses a
+    // distinct local label "2" to avoid colliding with it. "2b" below
+    // resolves to the address of the 0xcc byte, same mechanism as every
+    // other trap site, just under a different label number since "1"
+    // was taken here.
     std::string AsmStr =
         "movl ($0), %eax\n\t"
         ".byte 0x3d, 0x01, 0x00, 0x00, 0x00\n\t"
         "jle 1f\n\t"
+        "2:\n\t"
         ".byte 0xcc\n\t"                   // trap byte
         ".byte 0x90, 0x90, 0x90, 0x90\n\t" // marker: loop vs edge
         ".byte " +
         std::to_string(b0) + ", " + std::to_string(b1) + ", " +
         std::to_string(b2) + ", " + std::to_string(b3) + "\n\t" +
+        ".pushsection __traps,\"aw\",@progbits\n\t"
+        ".balign 8\n\t"
+        ".quad 2b\n\t"
+        ".popsection\n\t"
         "1:\n\t"
         "addl $$1, %eax\n\t"
         "movl %eax, ($0)\n\t";
@@ -207,7 +219,6 @@ void insertCounterGuard(BasicBlock *HeaderBB, GlobalVariable *CounterArr,
         Ctx, ConstantAsMetadata::get(ConstantInt::get(I32Ty, id)));
     TrapCall->setMetadata("loop_header_id", MD);
 }
-
 // ---------------------------------------------------------------------
 // Pass 2: instrument every loop header in F (all nesting levels).
 // ---------------------------------------------------------------------

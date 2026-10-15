@@ -361,14 +361,6 @@ static void run_persistent(char *argv0, char *input)
         optind = 0; /* make getopt in target_main restart */
         target_main(3, args);
 
-        /* Reset order matters:
-         *  1. close files first (fclose needs the heap blocks it owns),
-         *  2. then free the heap blocks the target left behind,
-         *  3. then restore the globals that pointed at them. */
-        close_open_file_handles();
-        free_open_heap();
-        __untracer_restore_global();
-
         if (standalone)
             exit(0);
 
@@ -376,6 +368,47 @@ static void run_persistent(char *argv0, char *input)
         if (write(FORKSRV_FD + 1, &status, 4) != 4)
             _exit(0);
     }
+}
+
+extern void *__start___traps[];
+extern void *__stop___traps[];
+
+typedef struct
+{
+    void *addr;
+    uint32_t id;
+    int is_loop;
+} trap_entry;
+
+static trap_entry *g_traps;
+static size_t g_trap_count;
+
+static void collect_traps(void)
+{
+    size_t n = (size_t)(__stop___traps - __start___traps);
+    g_traps = malloc(n * sizeof(trap_entry));
+    if (!g_traps)
+    {
+        log_line("collect_traps: oom\n");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t kept = 0;
+    for (size_t i = 0; i < n; i++)
+    {
+        void *addr = __start___traps[i];
+        unsigned char *b = (unsigned char *)addr;
+
+        int is_loop = (b[1] == 0x90 && b[2] == 0x90 &&
+                       b[3] == 0x90 && b[4] == 0x90);
+        uint32_t id = is_loop
+                          ? (b[5] | (b[6] << 8) | (b[7] << 16) | (b[8] << 24))
+                          : (b[1] | (b[2] << 8) | (b[3] << 16) | (b[4] << 24));
+
+        g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
+    }
+    g_trap_count = kept;
+    log_line("collected %zu trap sites\n", g_trap_count);
 }
 
 int main(int argc, char **argv)
@@ -387,17 +420,12 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    /* Static stdout buffer, so stdout never points into a heap block that the
-     * tracker could free. Under --wrap, libc's own lazily allocated buffer is
-     * not tracked anyway, so this is a cheap safeguard rather than a must. */
     static KEEP char stdout_buf[BUFSIZ];
     setvbuf(stdout, stdout_buf, _IOFBF, sizeof(stdout_buf));
 
+    collect_traps(); // <-- new: read __traps before anything forks
     setup_shm();
     setup_signal();
-    __untracer_setup_global(); /* globals snapshot */
-    __untracer_snapshot_fds(); /* fd baseline */
-    __untracer_heap_start();   /* from here on the heap tracker records */
     run_persistent(argv[0], argv[1]);
     return 0;
 }
