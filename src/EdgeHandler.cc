@@ -7,73 +7,31 @@
 using namespace std;
 using namespace llvm;
 
+#include "llvm/Transforms/Utils/BasicBlockUtils.h" // SplitCriticalEdge
+
 void handleSwitchFallthroughEdge(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &seen)
 {
     auto *SI = dyn_cast<SwitchInst>(&TI);
     if (!SI)
         return;
     LLVMContext &Ctx = SI->getContext();
-    Function *F = SI->getFunction();
+    Type *Int32Ty = Type::getInt32Ty(Ctx);
 
     for (unsigned i = 0, e = SI->getNumSuccessors(); i != e; ++i)
     {
-        if (!isCriticalEdge(SI, i))
-            continue;
-
-        BasicBlock *OldDest = SI->getSuccessor(i);
+        BasicBlock *NewBB = SplitCriticalEdge(SI, i);
+        if (!NewBB)
+            continue; // not critical, nothing to do
 
         int id = count++;
-        std::string blockName = "sw.edge" + std::to_string(id);
-        BasicBlock *NewBB = BasicBlock::Create(Ctx, blockName, F, OldDest);
-        SI->setSuccessor(i, NewBB);
+        NewBB->setName("sw.edge" + std::to_string(id));
 
-        IRBuilder<> Builder(NewBB);
+        IRBuilder<> Builder(NewBB->getTerminator()); // insert before the br SplitCriticalEdge already added
         CallInst *TrapCall = Builder.CreateCall(makeTrapAsm(Ctx, id, /*category=*/0));
-        Type *Int32Ty = Type::getInt32Ty(Ctx);
         MDNode *MD = MDNode::get(Ctx, ConstantAsMetadata::get(ConstantInt::get(Int32Ty, id)));
         TrapCall->setMetadata("switch_fallthrough_id", MD);
-        Builder.CreateBr(OldDest);
-
-        for (PHINode &PN : OldDest->phis())
-        {
-            int Idx = PN.getBasicBlockIndex(SI->getParent());
-            if (Idx >= 0)
-                PN.setIncomingBlock(Idx, NewBB);
-        }
-
         seen.insert(NewBB);
     }
-}
-
-void handleDefaultBlockEdge(Instruction &TI, int &defaultAddedCount, SmallPtrSet<BasicBlock *, 16> &seen)
-{
-    auto *SI = dyn_cast<SwitchInst>(&TI);
-    if (!SI)
-        return;
-    LLVMContext &Ctx = SI->getContext();
-    Function *F = SI->getFunction();
-    Type *Int32Ty = Type::getInt32Ty(Ctx);
-    BasicBlock *OldDefaultDest = SI->getDefaultDest();
-    int id = defaultAddedCount++;
-    std::string blockName = "sw.default.dedicated" + std::to_string(id);
-    BasicBlock *NewDefaultBB = BasicBlock::Create(Ctx, blockName, F, OldDefaultDest);
-    SI->setDefaultDest(NewDefaultBB);
-    IRBuilder<> Builder(NewDefaultBB);
-
-    // ---- the only change: one call instead of 15 lines ----
-    InlineAsm *IA = makeTrapAsm(Ctx, id, /*category=*/0);
-
-    CallInst *TrapCall = Builder.CreateCall(IA);
-    MDNode *MD = MDNode::get(Ctx, ConstantAsMetadata::get(ConstantInt::get(Int32Ty, id)));
-    TrapCall->setMetadata("default_block_id", MD);
-    Builder.CreateBr(OldDefaultDest);
-    for (PHINode &PN : OldDefaultDest->phis())
-    {
-        int Idx = PN.getBasicBlockIndex(SI->getParent());
-        if (Idx >= 0)
-            PN.setIncomingBlock(Idx, NewDefaultBB);
-    }
-    seen.insert(NewDefaultBB);
 }
 
 void handleInvokeEdges(Instruction &TI, int &invokeAddedCount, SmallPtrSet<BasicBlock *, 16> &seen)
@@ -184,17 +142,7 @@ void handleIfEdges(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &s
                 }
                 IRBuilder<> Builder(NewElseBB);
 
-                // Encode id as 4 little-endian raw bytes placed right
-                // after the 0xcc trap byte — same convention as the
-                // loop guard's 0xf1 site. The runtime reads these
-                // directly off the SIGTRAP return address instead of
-                // decoding any instruction, so the offset (trap+1) is
-                // fixed regardless of codegen.
-
                 InlineAsm *IA = makeTrapAsm(Ctx, id, /*category=*/0);
-                // This call wraps the 0xcc trap byte (and the raw id
-                // bytes right after it) — tag it directly with the id
-                // metadata, same convention as the loop guard site.
                 CallInst *TrapCall = Builder.CreateCall(IA);
                 MDNode *MD = MDNode::get(Ctx, ConstantAsMetadata::get(ConstantInt::get(Int32Ty, id)));
                 TrapCall->setMetadata("else_block_id", MD);

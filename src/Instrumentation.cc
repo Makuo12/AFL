@@ -167,21 +167,9 @@ bool foundInSkipFunctions(StringRef fName)
 void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
 {
     int wholeCount = 0;
-    Type *Int32Ty = Type::getInt32Ty(M.getContext());
-    GlobalVariable *TrapIdGV = M.getGlobalVariable("__trap_id");
-    if (!TrapIdGV)
-    {
-        TrapIdGV = new GlobalVariable(
-            M, Int32Ty, /*isConstant=*/false,
-            GlobalValue::InternalLinkage,
-            ConstantInt::get(Int32Ty, 0),
-            "__trap_id");
-    }
-    SmallPtrSet<BasicBlock *, 16> pctableSeen;
-
     // Create up front so a harness declaring
     // `extern "C" void __reset_loop_counters()` links even with 0 loops.
-    // getOrCreateResetFn(M);
+    getOrCreateResetFn(M);
 
     // ---- Phase 1: edge handlers, all functions ----
     // These split blocks / edges, so they run BEFORE we count loop headers.
@@ -191,7 +179,7 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
             continue;
         instrumentBlocks(F, seen, wholeCount);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleDefaultBlockEdge(*BB.getTerminator(), wholeCount, seen);
+            handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
             handleIfEdges(*BB.getTerminator(), wholeCount, seen);
         for (BasicBlock &BB : llvm::make_early_inc_range(F))
@@ -221,44 +209,6 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
 
 }
 
-int writeInfo(map<string, BlockInfo> &blocks)
-{
-    ofstream file("./output/block_info.txt", std::ios::app);
-    if (!file.is_open())
-    {
-        errs() << "block_info file not open \n";
-        return 1;
-    }
-    string msg;
-    for (auto item : blocks)
-    {
-        msg.clear();
-        msg += item.first;
-        msg += " Block Count: " + std::to_string(item.second.blockCount);
-        msg += " Critical edge Count: " + std::to_string(item.second.criticalEdgeCount);
-        msg += "\n";
-        file.write(msg.data(), msg.size());
-    }
-    return 0;
-}
-
-void mainCountBlock(Module &M, map<string, BlockInfo> &blocks)
-{
-    int global_count = 0;
-    for (Function &F : M)
-    {
-        auto search = StringRef("llvm.");
-        auto it = std::search(F.getName().begin(), F.getName().end(), search.begin(), search.end());
-        if (it != F.getName().end())
-            continue; // skip LLVM intrinsics
-        if (F.getName() == "main" || foundInSkipFunctions(F.getName()))
-        {
-            continue;
-        }
-        processModule(M, F, global_count, blocks);
-    }
-    writeInfo(blocks);
-}
 
 int writeToFile(Module &M, const char *outputFile)
 {

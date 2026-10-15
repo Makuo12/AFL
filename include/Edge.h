@@ -9,8 +9,7 @@ struct BlockInfo
     int criticalEdgeCount = 0;
 };
 
-void handleSwitchFallthroughEdge(Instruction &TI, int &phiNodesInserted, SmallPtrSet<BasicBlock *, 16> &seen);
-void handleDefaultBlockEdge(Instruction &TI, int &defaultAddedCount, SmallPtrSet<BasicBlock *, 16> &seen);
+void handleSwitchFallthroughEdge(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &seen);
 void handleInvokeEdges(Instruction &TI, int &invokeAddedCount, SmallPtrSet<BasicBlock *, 16> &seen);
 void handleIfEdges(Instruction &TI, int &count, SmallPtrSet<BasicBlock *, 16> &seen);
 void countCriticalEdge(Instruction &TI, int &globalCount, int &criticalEdgeCount);
