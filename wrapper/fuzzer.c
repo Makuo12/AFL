@@ -18,11 +18,8 @@
  * would register them with the heap tracker, which frees them on reset and
  * leaves writable_pages dangling. These macros must precede the first
  * #include of uthash.h. */
-#define uthash_malloc(sz) __real_malloc(sz)
-#define uthash_free(ptr, sz) __real_free(ptr)
 #include "uthash.h"
 #include "data.h"
-#include "global.h"
 #include "config.h"
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
@@ -50,11 +47,6 @@ extern const struct mach_header_64 _mh_execute_header;
 // extern void __reset_loop_counters(void);
 extern int target_main(int argc, char **argv);
 extern void __reset_loop_counters(void);
-
-extern void __untracer_snapshot_fds(void); /* file-handle tracker */
-extern void close_open_file_handles(void);
-extern void __untracer_heap_start(void); /* heap tracker */
-extern void free_open_heap(void);
 
 typedef unsigned char u8;
 
@@ -155,8 +147,7 @@ void make_range_writable(uintptr_t start, uintptr_t end)
             _exit(EXIT_FAILURE);
         }
 
-        /* __real_malloc via the uthash macros above: untracked, persistent. */
-        writable_page *entry = (writable_page *)__real_malloc(sizeof(*entry));
+        writable_page *entry = (writable_page *)malloc(sizeof(*entry));
         if (entry)
         {
             entry->page = page;
