@@ -27,8 +27,6 @@
 extern const struct mach_header_64 _mh_execute_header;
 #endif
 
-/* State in this section survives __untracer_restore_global(). */
-#define KEEP __attribute__((section("untracer_state")))
 
 #if defined(__linux__)
 #define UC_PC(uc) ((uc)->uc_mcontext.gregs[REG_RIP])
@@ -59,10 +57,10 @@ typedef struct
     UT_hash_handle hh;
 } writable_page;
 
-KEEP writable_page *writable_pages = NULL;
+writable_page *writable_pages = NULL;
 
 #define DEFAULT_LOG_PATH "./output/trap_handler.log"
-static KEEP char log_path[4096] = DEFAULT_LOG_PATH;
+static char log_path[4096] = DEFAULT_LOG_PATH;
 
 static void init_log_path(void)
 {
@@ -410,9 +408,6 @@ int main(int argc, char **argv)
         log_line("usage: harness <input_file>\n");
         exit(EXIT_FAILURE);
     }
-
-    static KEEP char stdout_buf[BUFSIZ];
-    setvbuf(stdout, stdout_buf, _IOFBF, sizeof(stdout_buf));
 
     collect_traps(); // <-- new: read __traps before anything forks
     setup_shm();
