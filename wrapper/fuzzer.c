@@ -395,6 +395,8 @@ static void collect_traps(void)
                           : (b[1] | (b[2] << 8) | (b[3] << 16) | (b[4] << 24));
 
         g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
+        log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
+                 i, g_traps[i].addr, g_traps[i].id, g_traps[i].is_loop);
     }
     g_trap_count = kept;
     log_line("collected %zu trap sites\n", g_trap_count);
