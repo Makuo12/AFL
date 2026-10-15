@@ -2,14 +2,13 @@
 #SBATCH --job-name=improving_afl_run
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
-#SBATCH --nodelist=tc-intel012
-#SBATCH --time=25:00:00
+#SBATCH --time=00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --output=./logs/fuzz-%j.log
 #SBATCH --error=./logs/fuzz-%j.log
-#SBATCH --array=1-5
+#SBATCH --array=1
 
 set -euo pipefail
 
@@ -25,7 +24,7 @@ export AFL_DISABLE_TRIM=1
 export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
 export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
-FUZZ_SECONDS=$((24*60*60))
+FUZZ_SECONDS=$((4*60))
 TRACE="main.trace"
 ORACLE="main.oracle"
 PROGRAM="improving_afl"
