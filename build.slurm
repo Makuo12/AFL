@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=improving_afl_build
+#SBATCH --job-name=forkserver_build
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
 #SBATCH --constraint=intel
@@ -18,7 +18,7 @@ if [ "${1:-}" = "arc" ]; then
     module load GCCcore/14.3.0
     pip install --user wllvm
     export PATH="$HOME/.local/bin:$PATH"
-    wrap="$HOME/improving/AFL"
+    wrap="$HOME/forkserver/AFL"
     export BASE_ADDRESS=0x400000
 else
     export LLVM_CC_NAME=clang-20        # ← pin to version 20
@@ -106,29 +106,6 @@ $BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc $wrap/src/DeEdgeHandler.cc \
 
 $wrap/output/edge "$wrap/output/out.ll" "$wrap/output/main.transformed.ll"
 
-# Fail early if the pass did not tag any globals.
-grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
-    || { echo "ERROR: pass did not tag any globals"; exit 1; }
-
-# Runtime sources are compiled as C (-x c) so the --wrap symbols and the
-# __real_* declarations keep plain C names.
-# Runtime sources are compiled as C (-x c) so the --wrap symbols and the
-# __real_* declarations keep plain C names.
-RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/heap_track_oa.c -x none"
-
-# File-handle wrappers (filer.c)
-FILE_WRAP_FLAGS="-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
-                 -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
-
-# Heap wrappers (heap_track_oa.c)
-MEM_WRAP_FLAGS="-Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free \
-                -Wl,--wrap=reallocarray -Wl,--wrap=memalign -Wl,--wrap=aligned_alloc \
-                -Wl,--wrap=posix_memalign -Wl,--wrap=valloc -Wl,--wrap=pvalloc \
-                -Wl,--wrap=strdup -Wl,--wrap=strndup \
-                -Wl,--wrap=getline -Wl,--wrap=getdelim"
-
-WRAP_FLAGS="$FILE_WRAP_FLAGS $MEM_WRAP_FLAGS"
-
 echo "Building final binary"
 if [[ "$(uname -s)" == "Darwin" ]]; then
     INCLUDE="-isysroot $(xcrun --show-sdk-path)"
@@ -142,13 +119,11 @@ elif [[ "$(uname -s)" == "Linux" ]]; then
             $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
-            $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     else
         $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
             $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie \
-            $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     fi
     cp  $wrap/output/main.oracle $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass.
@@ -157,11 +132,4 @@ else
     exit 1
 fi
 
-# echo "Verifying final binary"
-# readelf -S $wrap/output/main.oracle | grep -q ' __cls_glob' \
-#     || { echo "ERROR: __cls_glob missing from binary"; exit 1; }
-# nm $wrap/output/main.oracle | grep -q ' T __untracer_setup_global' \
-#     || { echo "ERROR: global runtime not linked"; exit 1; }
-# nm $wrap/output/main.oracle | grep -q ' T __wrap_fopen' \
-#     || { echo "ERROR: file-handle wrappers not linked"; exit 1; }
 echo "Done with build"
