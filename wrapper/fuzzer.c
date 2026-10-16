@@ -350,7 +350,8 @@ static void run_forkserver(char *argv0, char *input)
         {
             __reset_loop_counters();
             optind = 0;
-            target_main(3, args);
+            int rc = target_main(3, args);
+            _exit(rc);
         }
         else if (child < 0)
         {
