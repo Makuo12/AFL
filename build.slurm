@@ -2,7 +2,7 @@
 #SBATCH --job-name=forkserver_build
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
-#SBATCH --constraint=intel
+#SBATCH --constraint=amd
 #SBATCH --time=01:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
