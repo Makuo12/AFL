@@ -119,43 +119,6 @@ static void sig_log(const char *msg, uintptr_t val)
         (void)!write(2, buf, n);
 }
 
-/* ------------------------------------------------------------------ */
-/* Code-page patching                                                 */
-/* ------------------------------------------------------------------ */
-
-// No more needed 
-// void make_range_writable(uintptr_t start, uintptr_t end)
-// {
-//     static size_t page_size = 0;
-//     if (!page_size)
-//         page_size = (size_t)sysconf(_SC_PAGESIZE);
-
-//     uintptr_t page = start & ~(uintptr_t)(page_size - 1);
-//     uintptr_t last_page = (end + 4) & ~(uintptr_t)(page_size - 1); // cover end..end+4 too
-
-//     for (; page <= last_page; page += page_size)
-//     {
-//         writable_page *found;
-//         HASH_FIND(hh, writable_pages, &page, sizeof(uintptr_t), found);
-
-//         if (found)
-//             continue; /* already writable - skip the syscall */
-
-//         if (mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
-//         {
-//             sig_log("mprotect failed, page=", page);
-//             _exit(EXIT_FAILURE);
-//         }
-
-//         writable_page *entry = (writable_page *)malloc(sizeof(*entry));
-//         if (entry)
-//         {
-//             entry->page = page;
-//             HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
-//         }
-//     }
-// }
-
 static inline void record_hit(int32_t idx, uint32_t val, int is_loop)
 {
     if (idx < 0 || idx >= MAP_SIZE)
