@@ -8623,7 +8623,6 @@ int main(int argc, char **argv)
 
   setup_post();
   setup_shm();
-  // init_count_class16();
 
   setup_dirs_fds();
   read_testcases();
