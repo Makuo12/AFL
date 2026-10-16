@@ -359,8 +359,15 @@ static void run_forkserver(char *argv0, char *input)
             exit(EXIT_FAILURE);
         }
 
-        int wait_status;
-        waitpid(child, &wait_status, 0);
+        int wait_status = 0;
+        while (waitpid(child, &wait_status, 0) < 0)
+        {
+            if (errno != EINTR)
+            {
+                log_line("waitpid: %s\n", strerror(errno));
+                _exit(1);
+            }
+        }
 
         if (WIFSIGNALED(wait_status))
             log_line("child %d killed by signal %d%s\n", child,
