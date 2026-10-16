@@ -122,37 +122,38 @@ static void sig_log(const char *msg, uintptr_t val)
 /* Code-page patching                                                 */
 /* ------------------------------------------------------------------ */
 
-void make_range_writable(uintptr_t start, uintptr_t end)
-{
-    static size_t page_size = 0;
-    if (!page_size)
-        page_size = (size_t)sysconf(_SC_PAGESIZE);
+// No more needed 
+// void make_range_writable(uintptr_t start, uintptr_t end)
+// {
+//     static size_t page_size = 0;
+//     if (!page_size)
+//         page_size = (size_t)sysconf(_SC_PAGESIZE);
 
-    uintptr_t page = start & ~(uintptr_t)(page_size - 1);
-    uintptr_t last_page = (end + 4) & ~(uintptr_t)(page_size - 1); // cover end..end+4 too
+//     uintptr_t page = start & ~(uintptr_t)(page_size - 1);
+//     uintptr_t last_page = (end + 4) & ~(uintptr_t)(page_size - 1); // cover end..end+4 too
 
-    for (; page <= last_page; page += page_size)
-    {
-        writable_page *found;
-        HASH_FIND(hh, writable_pages, &page, sizeof(uintptr_t), found);
+//     for (; page <= last_page; page += page_size)
+//     {
+//         writable_page *found;
+//         HASH_FIND(hh, writable_pages, &page, sizeof(uintptr_t), found);
 
-        if (found)
-            continue; /* already writable - skip the syscall */
+//         if (found)
+//             continue; /* already writable - skip the syscall */
 
-        if (mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
-        {
-            sig_log("mprotect failed, page=", page);
-            _exit(EXIT_FAILURE);
-        }
+//         if (mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+//         {
+//             sig_log("mprotect failed, page=", page);
+//             _exit(EXIT_FAILURE);
+//         }
 
-        writable_page *entry = (writable_page *)malloc(sizeof(*entry));
-        if (entry)
-        {
-            entry->page = page;
-            HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
-        }
-    }
-}
+//         writable_page *entry = (writable_page *)malloc(sizeof(*entry));
+//         if (entry)
+//         {
+//             entry->page = page;
+//             HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
+//         }
+//     }
+// }
 
 static inline void record_hit(int32_t idx, uint32_t val, int is_loop)
 {
@@ -183,8 +184,6 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         raise(SIGKILL);
         return;
     }
-
-    make_range_writable(addr - 7, addr + 9);
 
     uintptr_t resume_addr = 0;
     unsigned char *trap = (unsigned char *)addr;
@@ -256,7 +255,6 @@ void crash_handler(int sig, siginfo_t *info, void *ctx)
         trace_bits[2] = (uint32_t)sig;
     }
     sig_log("fatal signal, rip=", rip);
-    raise(SIGKILL);
 }
 
 static char altstack[64 * 1024]; /* lets crash_handler run after a stack overflow */
@@ -328,7 +326,7 @@ void setup_shm(void)
 /* Persistent loop                                                    */
 /* ------------------------------------------------------------------ */
 
-static void run_persistent(char *argv0, char *input)
+static void run_forkserver(char *argv0, char *input)
 {
     uint32_t msg = 0;
 
@@ -346,15 +344,35 @@ static void run_persistent(char *argv0, char *input)
             if (read(FORKSRV_FD, &cmd, 4) != 4)
                 _exit(0); /* afl went away */
         }
-        __reset_loop_counters();
-        optind = 0; /* make getopt in target_main restart */
-        target_main(3, args);
+        pid_t child = fork();
+        if (child == 0)
+        {
+            __reset_loop_counters();
+            optind = 0;
+            target_main(3, args);
+        }
+        else if (child < 0)
+        {
+            log_line("could not fork child");
+            exit(EXIT_FAILURE);
+        }
+
+        int wait_status;
+        waitpid(child, &wait_status, 0);
+
+        if (WIFSIGNALED(wait_status))
+            log_line("child %d killed by signal %d%s\n", child,
+                    WTERMSIG(wait_status),
+                    WCOREDUMP(wait_status) ? " (core dumped)" : "");
+        else if (WIFEXITED(wait_status))
+            log_line("child %d exited with code %d\n", child, WEXITSTATUS(wait_status));
+        else
+            log_line("child %d ended with unexpected status 0x%x\n", child, wait_status);
 
         if (standalone)
             exit(0);
 
-        uint32_t status = 0; /* must be 0, see above */
-        if (write(FORKSRV_FD + 1, &status, 4) != 4)
+        if (write(FORKSRV_FD + 1, &wait_status, 4) != 4)
             _exit(0);
     }
 }
@@ -371,6 +389,103 @@ typedef struct
 
 static trap_entry *g_traps;
 static size_t g_trap_count;
+
+static void remap_page_shared(uintptr_t page_addr, long pg)
+{
+    int fd = memfd_create("text_shared", 0);
+    if (fd < 0)
+    {
+        log_line("memfd_create failed for %p\n", (void *)page_addr);
+        exit(EXIT_FAILURE);
+    }
+
+    if (ftruncate(fd, pg) != 0)
+    {
+        log_line("ftruncate failed for %p\n", (void *)page_addr);
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    ssize_t written = write(fd, (void *)page_addr, pg);
+    if (written != pg)
+    {
+        log_line("short write copying page %p (%zd/%ld)\n", (void *)page_addr, written, pg);
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
+
+    void *r = mmap((void *)page_addr, pg, PROT_READ | PROT_WRITE | PROT_EXEC,
+                   MAP_SHARED | MAP_FIXED, fd, 0);
+    close(fd); // mapping holds its own reference; fd not needed after mmap
+
+    if (r == MAP_FAILED)
+    {
+        log_line("mmap MAP_FIXED failed for %p\n", (void *)page_addr);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void make_pages_shared(void)
+{
+    long pg = sysconf(_SC_PAGESIZE);
+    uintptr_t pgmask = ~(uintptr_t)(pg - 1);
+
+    // Each trap's full on-disk span: 0xcc + 4 id bytes (category 0),
+    // or 0xcc + 4 marker bytes + 4 id bytes (category 1, loop headers).
+    // Any byte in that span may be overwritten for de-instrumentation,
+    // so every page touched by the span — not just the page containing
+    // the first byte — must be remapped shared.
+    const uintptr_t span0 = 5; // 1 (0xcc) + 4 (id)
+    const uintptr_t span1 = 9; // 1 (0xcc) + 4 (marker) + 4 (id)
+
+    // Worst case: every trap touches 2 distinct pages (start + end).
+    uintptr_t *pages = malloc(2 * g_trap_count * sizeof(uintptr_t));
+    if (!pages)
+    {
+        log_line("make_pages_shared: oom\n");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t npages = 0;
+    for (size_t i = 0; i < g_trap_count; i++)
+    {
+        uintptr_t start = (uintptr_t)g_traps[i].addr;
+        uintptr_t span = g_traps[i].is_loop ? span1 : span0;
+        uintptr_t end = start + span - 1; // last byte actually belonging to this trap
+
+        uintptr_t base_start = start & pgmask;
+        uintptr_t base_end = end & pgmask;
+
+        // base_start is always needed; base_end only differs (and is only
+        // needed) if the trap's tail bytes crossed into the next page.
+        uintptr_t candidates[2] = {base_start, base_end};
+        int ncand = (base_start == base_end) ? 1 : 2;
+
+        for (int c = 0; c < ncand; c++)
+        {
+            uintptr_t base = candidates[c];
+            int dup = 0;
+            for (size_t j = 0; j < npages; j++)
+            {
+                if (pages[j] == base)
+                {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (!dup)
+                pages[npages++] = base;
+        }
+    }
+
+    log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
+             npages, g_trap_count);
+
+    for (size_t i = 0; i < npages; i++)
+        remap_page_shared(pages[i], pg);
+
+    free(pages);
+}
 
 static void collect_traps(void)
 {
@@ -411,9 +526,11 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    collect_traps(); // <-- new: read __traps before anything forks
+    collect_traps();
+    make_pages_shared(); // <-- add this
+
     setup_shm();
     setup_signal();
-    run_persistent(argv[0], argv[1]);
+    run_forkserver(argv[0], argv[1]);
     return 0;
 }
