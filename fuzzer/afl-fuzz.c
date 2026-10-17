@@ -225,6 +225,7 @@ static u32 rand_cnt; /* Random number counter            */
 
 static u64 total_cal_us, /* Total calibration time (us)      */
     total_cal_cycles;    /* Total calibration cycles         */
+    total_len;
 
 static u64 total_bitmap_size, /* Total bit count for all bitmaps  */
     total_bitmap_entries;     /* Number of bitmaps counted        */
@@ -239,6 +240,8 @@ static s32 cpu_aff = -1; /* Selected CPU core                */
 
 static FILE *plot_file; /* Gnuplot output file              */
 
+
+
 struct queue_entry
 {
 
@@ -252,10 +255,11 @@ struct queue_entry
       has_new_cov,  /* Triggers new coverage?           */
       var_behavior, /* Variable behavior?               */
       favored,      /* Currently favored?               */
-      fs_redundant; /* Marked as redundant in the fs?   */
+      fs_redundant, /* Marked as redundant in the fs?   */
+      re_run_cal;
 
-  u32 bitmap_size, /* Number of bits set in bitmap     */
-      exec_cksum;  /* Checksum of the execution trace  */
+  u32 bitmap_size; /* Number of bits set in bitmap     */
+      // exec_cksum;  /* Checksum of the execution trace  */
 
   u64 exec_us,  /* Execution time (us)              */
       handicap, /* Number of queue cycles behind    */
@@ -918,6 +922,10 @@ EXP_ST void read_bitmap(u8 *fname)
    This function is called after every exec() on a fairly large buffer, so
    it needs to be fast. We do this in 32-bit and 64-bit flavors. */
 
+static inline u8 has_new_traps() {
+  return (trace_bits[0] > 0 || trace_bits[3] > 0) ? 2 : 0;
+}
+
 static inline u8 has_new_bits(u8 *virgin_map)
 {
 
@@ -1033,27 +1041,28 @@ static u32 count_bits(u8 *mem)
 static u32 count_bytes(u8 *mem)
 {
 
-  u32 *ptr = (u32 *)mem;
-  u32 i = (MAP_SIZE >> 2);
+  // u32 *ptr = (u32 *)mem;
+  // u32 i = (MAP_SIZE >> 2);
   u32 ret = 0;
 
-  while (i--)
-  {
+  // while (i--)
+  // {
 
-    u32 v = *(ptr++);
+  //   u32 v = *(ptr++);
 
-    if (!v)
-      continue;
-    if (v & FF(0))
-      ret++;
-    if (v & FF(1))
-      ret++;
-    if (v & FF(2))
-      ret++;
-    if (v & FF(3))
-      ret++;
-  }
-
+  //   if (!v)
+  //     continue;
+  //   if (v & FF(0))
+  //     ret++;
+  //   if (v & FF(1))
+  //     ret++;
+  //   if (v & FF(2))
+  //     ret++;
+  //   if (v & FF(3))
+  //     ret++;
+  // }
+  ret += trace_bits[0];
+  ret += trace_bits[3];
   return ret;
 }
 
@@ -1333,6 +1342,69 @@ static void update_bitmap_score(struct queue_entry *q)
 
       score_changed = 1;
     }
+}
+
+static inline double fav_factor_of(struct queue_entry *q)
+{
+  return (double)q->exec_us * (double)q->len * (q->has_new_cov ? 0.15 : 1.0);
+}
+
+static void cull_trap_queue(void)
+{
+  struct queue_entry *q;
+
+  if (dumb_mode || !score_changed)
+    return;
+  score_changed = 0;
+
+  queued_favored = 0;
+  pending_favored = 0;
+
+  /* Pass 1: Welford's running mean and variance */
+  double mean = 0.0, m2 = 0.0;
+  u32 n = 0;
+
+  for (q = queue; q; q = q->next)
+  {
+    double x = fav_factor_of(q);
+    double delta = x - mean;
+    n++;
+    mean += delta / n;
+    m2 += delta * (x - mean);
+  }
+
+  if (n < 2)
+    return;
+
+  double variance = m2 / n; /* use (n - 1) for sample variance */
+  double sd = sqrt(variance);
+
+  /* Debug: count how many entries each threshold would flag */
+  u32 over1 = 0, over2 = 0;
+  for (q = queue; q; q = q->next)
+  {
+    double f = fav_factor_of(q);
+    if (f > mean + sd)
+      over1++;
+    if (f > mean + 2.0 * sd)
+      over2++;
+  }
+  fprintf(stderr, "n=%u over1sd=%u over2sd=%u\n", n, over1, over2);
+
+  /* Pass 2: flag entries more than 1 SD from the mean */
+  for (q = queue; q; q = q->next)
+  {
+    double factor = fav_factor_of(q);
+    double d = factor - mean;
+    if (d * d > variance && factor > mean)
+    {
+      /* too far from the mean: do whatever you want here */
+      q->favored = 0;
+    } else {
+      q->favored = 1;
+    }
+    mark_as_redundant(q, !q->favored);
+  }
 }
 
 /* The second part of the mechanism discussed above is a routine that
@@ -2692,8 +2764,9 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
   static u8 first_trace[MAP_SIZE];
 
-  u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
-     first_run = (q->exec_cksum == 0);
+  // u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
+  //    first_run = (q->exec_cksum == 0);
+  u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0, first_run = (!q->was_fuzzed || q->re_run_cal);
 
   u64 start_us, stop_us;
 
@@ -2729,12 +2802,16 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
   //     new_bits = hnb;
   // }
 
-  start_us = get_cur_time_us();
+  // start_us = get_cur_time_us();
+  // we start the time from the second run
+  start_us = 0;
 
   for (stage_cur = 0; stage_cur < stage_max; stage_cur++)
   {
-
-    u32 cksum;
+    if (stage_cur == 1) {
+      start_us = get_cur_time_us();
+    }
+    // u32 cksum;
 
     if (!first_run && !(stage_cur % stats_update_freq))
       show_stats();
@@ -2754,52 +2831,59 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
       fault = FAULT_NOINST;
       goto abort_calibration;
     }
+    // I added this in (makuo)
+    hnb = has_new_traps();
+    if (hnb > new_bits)
+      new_bits = hnb;
+    //
+    // cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
-    cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    // if (q->exec_cksum != cksum)
+    // {
 
-    if (q->exec_cksum != cksum)
-    {
+    //   hnb = has_new_bits(virgin_bits);
+    //   if (hnb > new_bits)
+    //     new_bits = hnb;
 
-      hnb = has_new_bits(virgin_bits);
-      if (hnb > new_bits)
-        new_bits = hnb;
+    //   if (q->exec_cksum)
+    //   {
 
-      if (q->exec_cksum)
-      {
+    //     u32 i;
 
-        u32 i;
+    //     for (i = 0; i < MAP_SIZE; i++)
+    //     {
 
-        for (i = 0; i < MAP_SIZE; i++)
-        {
+    //       if (!var_bytes[i] && first_trace[i] != trace_bits[i])
+    //       {
 
-          if (!var_bytes[i] && first_trace[i] != trace_bits[i])
-          {
+    //         var_bytes[i] = 1;
+    //         stage_max = CAL_CYCLES_LONG;
+    //       }
+    //     }
 
-            var_bytes[i] = 1;
-            stage_max = CAL_CYCLES_LONG;
-          }
-        }
+    //     var_detected = 1;
+    //   }
+    //   else
+    //   {
 
-        var_detected = 1;
-      }
-      else
-      {
-
-        q->exec_cksum = cksum;
-        memcpy(first_trace, trace_bits, MAP_SIZE);
-      }
-    }
+    //     q->exec_cksum = cksum;
+    //     memcpy(first_trace, trace_bits, MAP_SIZE);
+    //   }
+    // }
   }
 
   stop_us = get_cur_time_us();
 
   total_cal_us += stop_us - start_us;
-  total_cal_cycles += stage_max;
+  // total_cal_cycles += stage_max;
+  total_cal_cycles += (stage_max - 1);
+  total_len += q->len;
 
-  /* OK, let's collect some stats about the performance of this test case.
-     This is used for fuzzing air time calculations in calculate_score(). */
+      /* OK, let's collect some stats about the performance of this test case.
+         This is used for fuzzing air time calculations in calculate_score(). */
 
-  q->exec_us = (stop_us - start_us) / stage_max;
+      // q->exec_us = (stop_us - start_us) / stage_max;
+  q->exec_us = (stop_us - start_us) / (stage_max - 1);
   q->bitmap_size = count_bytes(trace_bits);
   q->handicap = handicap;
   q->cal_failed = 0;
@@ -2807,7 +2891,7 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
   total_bitmap_size += q->bitmap_size;
   total_bitmap_entries++;
 
-  update_bitmap_score(q);
+  // update_bitmap_score(q);
 
   /* If this case didn't result in new output from the instrumentation, tell
      parent. This is a non-critical problem, but something to warn the user
@@ -2826,17 +2910,17 @@ abort_calibration:
 
   /* Mark variable paths. */
 
-  if (var_detected)
-  {
+  // if (var_detected)
+  // {
 
-    var_byte_count = count_bytes(var_bytes);
+  //   var_byte_count = count_bytes(var_bytes);
 
-    if (!q->var_behavior)
-    {
-      mark_as_variable(q);
-      queued_variable++;
-    }
-  }
+  //   if (!q->var_behavior)
+  //   {
+  //     mark_as_variable(q);
+  //     queued_variable++;
+  //   }
+  // }
 
   stage_name = old_sn;
   stage_cur = old_sc;
@@ -2849,6 +2933,12 @@ abort_calibration:
 }
 
 /* Examine map coverage. Called once, for first test case. */
+
+static void check_trap_coverage(void) {
+  if (trace_bits[0] == 0 && trace_bits[3] == 0) {
+    WARNF("Recompile binary with newer version of afl to improve coverage!");
+  }
+}
 
 static void check_map_coverage(void)
 {
@@ -2912,8 +3002,10 @@ static void perform_dry_run(char **argv)
 
     case FAULT_NONE:
 
-      if (q == queue)
-        check_map_coverage();
+      if (q == queue) {
+        // check_map_coverage();
+        check_trap_coverage();
+      }
 
       if (crash_mode)
         FATAL("Test case '%s' does *NOT* crash", fn);
@@ -3330,13 +3422,18 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 
     /* Keep only if there are new bits in the map, add to queue for
        future fuzzing, etc. */
-
-    if (!(hnb = has_new_bits(virgin_bits)))
+    if (!(hnb = has_new_traps()))
     {
       if (crash_mode)
         total_crashes++;
       return 0;
     }
+    // if (!(hnb = has_new_bits(virgin_bits)))
+    // {
+    //   if (crash_mode)
+    //     total_crashes++;
+    //   return 0;
+    // }
 
 #ifndef SIMPLE_FILES
 
@@ -3357,7 +3454,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
       queued_with_cov++;
     }
 
-    queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    // queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
@@ -3394,14 +3491,15 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     if (!dumb_mode)
     {
 
-#ifdef WORD_SIZE_64
-      simplify_trace((u64 *)trace_bits);
-#else
-      simplify_trace((u32 *)trace_bits);
-#endif /* ^WORD_SIZE_64 */
-
-      if (!has_new_bits(virgin_tmout))
+// #ifdef WORD_SIZE_64
+//       simplify_trace((u64 *)trace_bits);
+// #else
+//       simplify_trace((u32 *)trace_bits);
+// #endif /* ^WORD_SIZE_64 */
+      if (!has_new_traps())
         return keeping;
+      // if (!has_new_bits(virgin_tmout))
+      //   return keeping;
     }
 
     unique_tmouts++;
@@ -3462,14 +3560,15 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     if (!dumb_mode)
     {
 
-#ifdef WORD_SIZE_64
-      simplify_trace((u64 *)trace_bits);
-#else
-      simplify_trace((u32 *)trace_bits);
-#endif /* ^WORD_SIZE_64 */
-
-      if (!has_new_bits(virgin_crash))
+// #ifdef WORD_SIZE_64
+//       simplify_trace((u64 *)trace_bits);
+// #else
+//       simplify_trace((u32 *)trace_bits);
+// #endif /* ^WORD_SIZE_64 */
+      if (!has_new_traps())
         return keeping;
+      // if (!has_new_bits(virgin_crash))
+      //   return keeping;
     }
 
     if (!unique_crashes)
@@ -3710,38 +3809,56 @@ static void write_stats_file(double bitmap_cvg, double stability, double eps)
 
 /* Update the plot file if there is a reason to. */
 
+// static void maybe_update_plot_file(double bitmap_cvg, double eps)
+// {
+
+//   static u32 prev_qp, prev_pf, prev_pnf, prev_ce, prev_md;
+//   static u64 prev_qc, prev_uc, prev_uh;
+
+//   if (prev_qp == queued_paths && prev_pf == pending_favored &&
+//       prev_pnf == pending_not_fuzzed && prev_ce == current_entry &&
+//       prev_qc == queue_cycle && prev_uc == unique_crashes &&
+//       prev_uh == unique_hangs && prev_md == max_depth)
+//     return;
+
+//   prev_qp = queued_paths;
+//   prev_pf = pending_favored;
+//   prev_pnf = pending_not_fuzzed;
+//   prev_ce = current_entry;
+//   prev_qc = queue_cycle;
+//   prev_uc = unique_crashes;
+//   prev_uh = unique_hangs;
+//   prev_md = max_depth;
+
+//   /* Fields in the file:
+
+//      unix_time, cycles_done, cur_path, paths_total, paths_not_fuzzed,
+//      favored_not_fuzzed, unique_crashes, unique_hangs, max_depth,
+//      execs_per_sec */
+
+//   fprintf(plot_file,
+//           "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f\n",
+//           get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
+//           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
+//           unique_hangs, max_depth, eps, total_timeout); /* ignore errors */
+
+//   fflush(plot_file);
+// }
+
 static void maybe_update_plot_file(double bitmap_cvg, double eps)
 {
-
-  static u32 prev_qp, prev_pf, prev_pnf, prev_ce, prev_md;
-  static u64 prev_qc, prev_uc, prev_uh;
-
-  if (prev_qp == queued_paths && prev_pf == pending_favored &&
-      prev_pnf == pending_not_fuzzed && prev_ce == current_entry &&
-      prev_qc == queue_cycle && prev_uc == unique_crashes &&
-      prev_uh == unique_hangs && prev_md == max_depth)
-    return;
-
-  prev_qp = queued_paths;
-  prev_pf = pending_favored;
-  prev_pnf = pending_not_fuzzed;
-  prev_ce = current_entry;
-  prev_qc = queue_cycle;
-  prev_uc = unique_crashes;
-  prev_uh = unique_hangs;
-  prev_md = max_depth;
 
   /* Fields in the file:
 
      unix_time, cycles_done, cur_path, paths_total, paths_not_fuzzed,
      favored_not_fuzzed, unique_crashes, unique_hangs, max_depth,
-     execs_per_sec */
+     execs_per_sec, total_execs */
 
   fprintf(plot_file,
-          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f\n",
+          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %llu, %llu\n",
           get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
-          unique_hangs, max_depth, eps); /* ignore errors */
+          unique_hangs, max_depth, eps, total_execs, total_tmouts);
 
   fflush(plot_file);
 }
@@ -4765,134 +4882,135 @@ static u32 next_p2(u32 val)
   return ret;
 }
 
+// Trim will not be utilized yet -> makuo
 /* Trim all new test cases to save cycles when doing deterministic checks. The
    trimmer uses power-of-two increments somewhere between 1/16 and 1/1024 of
    file size, to keep the stage short and sweet. */
 
-static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
-{
+// static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
+// {
 
-  static u8 tmp[64];
-  static u8 clean_trace[MAP_SIZE];
+//   static u8 tmp[64];
+//   static u8 clean_trace[MAP_SIZE];
 
-  u8 needs_write = 0, fault = 0;
-  u32 trim_exec = 0;
-  u32 remove_len;
-  u32 len_p2;
+//   u8 needs_write = 0, fault = 0;
+//   u32 trim_exec = 0;
+//   u32 remove_len;
+//   u32 len_p2;
 
-  /* Although the trimmer will be less useful when variable behavior is
-     detected, it will still work to some extent, so we don't check for
-     this. */
+//   /* Although the trimmer will be less useful when variable behavior is
+//      detected, it will still work to some extent, so we don't check for
+//      this. */
 
-  if (q->len < 5)
-    return 0;
+//   if (q->len < 5)
+//     return 0;
 
-  stage_name = tmp;
-  bytes_trim_in += q->len;
+//   stage_name = tmp;
+//   bytes_trim_in += q->len;
 
-  /* Select initial chunk len, starting with large steps. */
+//   /* Select initial chunk len, starting with large steps. */
 
-  len_p2 = next_p2(q->len);
+//   len_p2 = next_p2(q->len);
 
-  remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
+//   remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
 
-  /* Continue until the number of steps gets too high or the stepover
-     gets too small. */
+//   /* Continue until the number of steps gets too high or the stepover
+//      gets too small. */
 
-  while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES))
-  {
+//   while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES))
+//   {
 
-    u32 remove_pos = remove_len;
+//     u32 remove_pos = remove_len;
 
-    sprintf(tmp, "trim %s/%s", DI(remove_len), DI(remove_len));
+//     sprintf(tmp, "trim %s/%s", DI(remove_len), DI(remove_len));
 
-    stage_cur = 0;
-    stage_max = q->len / remove_len;
+//     stage_cur = 0;
+//     stage_max = q->len / remove_len;
 
-    while (remove_pos < q->len)
-    {
+//     while (remove_pos < q->len)
+//     {
 
-      u32 trim_avail = MIN(remove_len, q->len - remove_pos);
-      u32 cksum;
+//       u32 trim_avail = MIN(remove_len, q->len - remove_pos);
+//       u32 cksum;
 
-      write_with_gap(in_buf, q->len, remove_pos, trim_avail);
+//       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-      fault = run_target(argv, exec_tmout);
-      trim_execs++;
+//       fault = run_target(argv, exec_tmout);
+//       trim_execs++;
 
-      if (stop_soon || fault == FAULT_ERROR)
-        goto abort_trimming;
+//       if (stop_soon || fault == FAULT_ERROR)
+//         goto abort_trimming;
 
-      /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
+//       /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
 
-      cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+//       cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
-      /* If the deletion had no impact on the trace, make it permanent. This
-         isn't perfect for variable-path inputs, but we're just making a
-         best-effort pass, so it's not a big deal if we end up with false
-         negatives every now and then. */
+//       /* If the deletion had no impact on the trace, make it permanent. This
+//          isn't perfect for variable-path inputs, but we're just making a
+//          best-effort pass, so it's not a big deal if we end up with false
+//          negatives every now and then. */
 
-      if (cksum == q->exec_cksum)
-      {
+//       if (cksum == q->exec_cksum)
+//       {
 
-        u32 move_tail = q->len - remove_pos - trim_avail;
+//         u32 move_tail = q->len - remove_pos - trim_avail;
 
-        q->len -= trim_avail;
-        len_p2 = next_p2(q->len);
+//         q->len -= trim_avail;
+//         len_p2 = next_p2(q->len);
 
-        memmove(in_buf + remove_pos, in_buf + remove_pos + trim_avail,
-                move_tail);
+//         memmove(in_buf + remove_pos, in_buf + remove_pos + trim_avail,
+//                 move_tail);
 
-        /* Let's save a clean trace, which will be needed by
-           update_bitmap_score once we're done with the trimming stuff. */
+//         /* Let's save a clean trace, which will be needed by
+//            update_bitmap_score once we're done with the trimming stuff. */
 
-        if (!needs_write)
-        {
+//         if (!needs_write)
+//         {
 
-          needs_write = 1;
-          memcpy(clean_trace, trace_bits, MAP_SIZE);
-        }
-      }
-      else
-        remove_pos += remove_len;
+//           needs_write = 1;
+//           memcpy(clean_trace, trace_bits, MAP_SIZE);
+//         }
+//       }
+//       else
+//         remove_pos += remove_len;
 
-      /* Since this can be slow, update the screen every now and then. */
+//       /* Since this can be slow, update the screen every now and then. */
 
-      if (!(trim_exec++ % stats_update_freq))
-        show_stats();
-      stage_cur++;
-    }
+//       if (!(trim_exec++ % stats_update_freq))
+//         show_stats();
+//       stage_cur++;
+//     }
 
-    remove_len >>= 1;
-  }
+//     remove_len >>= 1;
+//   }
 
-  /* If we have made changes to in_buf, we also need to update the on-disk
-     version of the test case. */
+//   /* If we have made changes to in_buf, we also need to update the on-disk
+//      version of the test case. */
 
-  if (needs_write)
-  {
+//   if (needs_write)
+//   {
 
-    s32 fd;
+//     s32 fd;
 
-    unlink(q->fname); /* ignore errors */
+//     unlink(q->fname); /* ignore errors */
 
-    fd = open(q->fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+//     fd = open(q->fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-    if (fd < 0)
-      PFATAL("Unable to create '%s'", q->fname);
+//     if (fd < 0)
+//       PFATAL("Unable to create '%s'", q->fname);
 
-    ck_write(fd, in_buf, q->len, q->fname);
-    close(fd);
+//     ck_write(fd, in_buf, q->len, q->fname);
+//     close(fd);
 
-    memcpy(trace_bits, clean_trace, MAP_SIZE);
-    update_bitmap_score(q);
-  }
+//     memcpy(trace_bits, clean_trace, MAP_SIZE);
+//     update_bitmap_score(q);
+//   }
 
-abort_trimming:
+// abort_trimming:
 
-  bytes_trim_out += q->len;
-  return fault;
-}
+//   bytes_trim_out += q->len;
+//   return fault;
+// }
 
 /* Write a modified test case, run program, process results. Handle
    error conditions, returning 1 if it's time to bail out. This is
@@ -5006,7 +5124,7 @@ static u32 calculate_score(struct queue_entry *q)
 {
 
   u32 avg_exec_us = total_cal_us / total_cal_cycles;
-  u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
+  // u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
   u32 perf_score = 100;
 
   /* Adjust score based on execution speed of this path, compared to the
@@ -5031,18 +5149,49 @@ static u32 calculate_score(struct queue_entry *q)
   /* Adjust score based on bitmap size. The working theory is that better
      coverage translates to better targets. Multiplier from 0.25x to 3x. */
 
-  if (q->bitmap_size * 0.3 > avg_bitmap_size)
-    perf_score *= 3;
-  else if (q->bitmap_size * 0.5 > avg_bitmap_size)
-    perf_score *= 2;
-  else if (q->bitmap_size * 0.75 > avg_bitmap_size)
-    perf_score *= 1.5;
-  else if (q->bitmap_size * 3 < avg_bitmap_size)
-    perf_score *= 0.25;
-  else if (q->bitmap_size * 2 < avg_bitmap_size)
-    perf_score *= 0.5;
-  else if (q->bitmap_size * 1.5 < avg_bitmap_size)
-    perf_score *= 0.75;
+  // if (q->bitmap_size * 0.3 > avg_bitmap_size)
+  //   perf_score *= 3;
+  // else if (q->bitmap_size * 0.5 > avg_bitmap_size)
+  //   perf_score *= 2;
+  // else if (q->bitmap_size * 0.75 > avg_bitmap_size)
+  //   perf_score *= 1.5;
+  // else if (q->bitmap_size * 3 < avg_bitmap_size)
+  //   perf_score *= 0.25;
+  // else if (q->bitmap_size * 2 < avg_bitmap_size)
+  //   perf_score *= 0.5;
+  // else if (q->bitmap_size * 1.5 < avg_bitmap_size)
+  //   perf_score *= 0.75;
+  double avg_len = (total_len / queued_paths);
+  double len_ratio =  avg_len > 0 ? (double)q->len / avg_len : 1.0; /* <1 = shorter than average */
+
+  if (q->has_new_cov)
+  {
+    /* new coverage: short inputs get the biggest boost */
+    if (len_ratio < 0.33)
+      perf_score *= 4;
+    else if (len_ratio < 0.5)
+      perf_score *= 3;
+    else if (len_ratio < 0.75)
+      perf_score *= 2;
+    else if (len_ratio < 1.0)
+      perf_score *= 1.5;
+    else if (len_ratio > 3.0)
+      perf_score *= 0.75; /* big and new: mild penalty only */
+  }
+  else
+  {
+    /* no new coverage: favor short, penalize long */
+    if (len_ratio < 0.5)
+      perf_score *= 1.5;
+    else if (len_ratio < 0.75)
+      perf_score *= 1.25;
+    else if (len_ratio > 3.0)
+      perf_score *= 0.25;
+    else if (len_ratio > 2.0)
+      perf_score *= 0.5;
+    else if (len_ratio > 1.5)
+      perf_score *= 0.75;
+  }
 
   /* Adjust score based on handicap. Handicap is proportional to how late
      in the game we learned about this path. Latecomers are allowed to run
@@ -5415,7 +5564,8 @@ static u8 fuzz_one(char **argv)
          avoiding the usage of an invalid trace_bits.
          For more info: https://github.com/AFLplusplus/AFLplusplus/pull/425 */
 
-      queue_cur->exec_cksum = 0;
+      // queue_cur->exec_cksum = 0;
+      queue_cur->re_run_cal = 1;
 
       res = calibrate_case(argv, queue_cur, in_buf, queue_cycle - 1, 0);
 
@@ -5474,7 +5624,10 @@ static u8 fuzz_one(char **argv)
   /* Skip deterministic fuzzing if exec path checksum puts this out of scope
      for this master instance. */
 
-  if (master_max && (queue_cur->exec_cksum % master_max) != master_id - 1)
+  // if (master_max && (queue_cur->exec_cksum % master_max) != master_id - 1)
+  //   goto havoc_stage;
+
+  if (master_max)
     goto havoc_stage;
 
   doing_det = 1;
@@ -5482,7 +5635,7 @@ static u8 fuzz_one(char **argv)
   /*********************************************
    * SIMPLE BITFLIP (+dictionary construction) *
    *********************************************/
-
+  // BITFLIP will not work well not implemented yet to work with trap base instrumentation
 #define FLIP_BIT(_ar, _b)                     \
   do                                          \
   {                                           \
@@ -5501,7 +5654,8 @@ static u8 fuzz_one(char **argv)
 
   orig_hit_cnt = queued_paths + unique_crashes;
 
-  prev_cksum = queue_cur->exec_cksum;
+  // prev_cksum = queue_cur->exec_cksum;
+  prev_cksum;
 
   for (stage_cur = 0; stage_cur < stage_max; stage_cur++)
   {
@@ -5576,13 +5730,13 @@ static u8 fuzz_one(char **argv)
       /* Continue collecting string, but only if the bit flip actually made
          any difference - we don't want no-op tokens. */
 
-      if (cksum != queue_cur->exec_cksum)
-      {
+      // if (cksum != queue_cur->exec_cksum)
+      // {
 
-        if (a_len < MAX_AUTO_EXTRA)
-          a_collect[a_len] = out_buf[stage_cur >> 3];
-        a_len++;
-      }
+      //   if (a_len < MAX_AUTO_EXTRA)
+      //     a_collect[a_len] = out_buf[stage_cur >> 3];
+      //   a_len++;
+      // }
     }
   }
 
@@ -5707,16 +5861,16 @@ static u8 fuzz_one(char **argv)
       /* If in dumb mode or if the file is very short, just flag everything
          without wasting time on checksums. */
 
-      if (!dumb_mode && len >= EFF_MIN_LEN)
-        cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-      else
-        cksum = ~queue_cur->exec_cksum;
+      // if (!dumb_mode && len >= EFF_MIN_LEN)
+      //   cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+      // else
+      //   cksum = ~queue_cur->exec_cksum;
 
-      if (cksum != queue_cur->exec_cksum)
-      {
-        eff_map[EFF_APOS(stage_cur)] = 1;
-        eff_cnt++;
-      }
+      // if (cksum != queue_cur->exec_cksum)
+      // {
+      //   eff_map[EFF_APOS(stage_cur)] = 1;
+      //   eff_cnt++;
+      // }
     }
 
     out_buf[stage_cur] ^= 0xFF;
@@ -8221,12 +8375,12 @@ static char **get_qemu_argv(u8 *own_loc, char **argv, int argc)
   else
     ck_free(own_copy);
 
-  if (!access(BIN_PATH "/afl-qemu-trace", X_OK))
-  {
+  // if (!access(BIN_PATH "/afl-qemu-trace", X_OK))
+  // {
 
-    target_path = new_argv[0] = ck_strdup(BIN_PATH "/afl-qemu-trace");
-    return new_argv;
-  }
+  //   target_path = new_argv[0] = ck_strdup(BIN_PATH "/afl-qemu-trace");
+  //   return new_argv;
+  // }
 
   SAYF("\n" cLRD "[-] " cRST
        "Oops, unable to find the 'afl-qemu-trace' binary. The binary must be built\n"
@@ -8620,7 +8774,8 @@ int main(int argc, char **argv)
 
   perform_dry_run(use_argv);
 
-  cull_queue();
+  // cull_queue();
+  cull_trap_queue();
 
   show_init_stats();
 
@@ -8647,7 +8802,8 @@ int main(int argc, char **argv)
 
     u8 skipped_fuzz;
 
-    cull_queue();
+    // cull_queue();
+    cull_trap_queue();
 
     if (!queue_cur)
     {
