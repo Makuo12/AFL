@@ -207,13 +207,20 @@ void setup_signal(void)
 /* Shared memory setup                                                */
 /* ------------------------------------------------------------------ */
 
-static uint32_t *attach_shm(const char *env_name)
+static uint32_t *attach_shm(const char *env_name, size_t nwords)
 {
     const char *env = getenv(env_name);
     if (env == NULL)
     {
-        log_line("%s not set\n", env_name);
-        exit(EXIT_FAILURE);
+        /* standalone replay: zero-filled map shared with the forked child */
+        void *p = mmap(NULL, nwords * sizeof(uint32_t), PROT_READ | PROT_WRITE,
+                       MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (p == MAP_FAILED)
+        {
+            log_line("anon mmap failed for %s: %s\n", env_name, strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+        return (uint32_t *)p;
     }
 
     errno = 0;
@@ -222,6 +229,14 @@ static uint32_t *attach_shm(const char *env_name)
     if (errno != 0 || endptr == env || *endptr != '\0' || id < 0)
     {
         log_line("invalid %s value: %s\n", env_name, env);
+        exit(EXIT_FAILURE);
+    }
+
+    struct shmid_ds ds;
+    if (shmctl((int)id, IPC_STAT, &ds) == 0 && ds.shm_segsz < nwords * sizeof(uint32_t))
+    {
+        log_line("%s segment too small (%zu < %zu): fuzzer/harness built with different config.h?\n",
+                 env_name, (size_t)ds.shm_segsz, nwords * sizeof(uint32_t));
         exit(EXIT_FAILURE);
     }
 
@@ -236,18 +251,14 @@ static uint32_t *attach_shm(const char *env_name)
 
 void setup_shm(void)
 {
-    virgin_bits = attach_shm(SHM_ID);
-    trace_bits = attach_shm(SHM_ENV_VAR);
+    virgin_bits = attach_shm(SHM_ID, MAP_SIZE);
+    trace_bits = attach_shm(SHM_ENV_VAR, MAP_SIZE_TRACE);
 }
-
-/* ------------------------------------------------------------------ */
-/* Persistent loop                                                    */
-/* ------------------------------------------------------------------ */
 
 static void run_forkserver(char *argv0, char *input)
 {
     uint32_t msg = 1;
-    int standalone = (write(FORKSRV_FD + 1, &msg, 4) != 4);
+    int standalone = !getenv(SHM_ENV_VAR) || write(FORKSRV_FD + 1, &msg, 4) != 4;
 
     char devnull[] = "/dev/null";
     char *args[] = {argv0, input, devnull, NULL};
@@ -264,6 +275,8 @@ static void run_forkserver(char *argv0, char *input)
         pid_t child = fork();
         if (child == 0)
         {
+            close(FORKSRV_FD); /* don't hold afl's pipes open */
+            close(FORKSRV_FD + 1);
             __reset_loop_counters();
             int rc = target_main(3, args);
             fflush(NULL);
@@ -293,7 +306,12 @@ static void run_forkserver(char *argv0, char *input)
         }
 
         if (standalone)
-            exit(0);
+        {
+            if (WIFSIGNALED(wait_status))
+                log_line("child killed by signal %d\n", WTERMSIG(wait_status));
+            log_line("new edges=%u new loop buckets=%u\n", trace_bits[0], trace_bits[3]);
+            exit(WIFEXITED(wait_status) ? WEXITSTATUS(wait_status) : 128 + WTERMSIG(wait_status));
+        }
 
         if (write(FORKSRV_FD + 1, &wait_status, 4) != 4)
             _exit(0);
@@ -372,9 +390,14 @@ static void make_pages_shared(void)
     size_t npages = 0;
     for (size_t i = 0; i < g_trap_count; i++)
     {
-        uintptr_t start = (uintptr_t)g_traps[i].addr;
+        // uintptr_t start = (uintptr_t)g_traps[i].addr;
+        uintptr_t addr = (uintptr_t)g_traps[i].addr;
+
         uintptr_t span = g_traps[i].is_loop ? span1 : span0;
-        uintptr_t end = start + span - 1; // last byte actually belonging to this trap
+        // uintptr_t end = start + span - 1; // last byte actually belonging to this trap
+
+        uintptr_t start = addr - (g_traps[i].is_loop ? 7 : 0);
+        uintptr_t end = addr + span - 1;
 
         uintptr_t base_start = start & pgmask;
         uintptr_t base_end = end & pgmask;

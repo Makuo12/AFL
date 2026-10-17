@@ -46,6 +46,7 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -138,6 +139,8 @@ EXP_ST u8 skip_deterministic, /* Skip deterministic stages?       */
     deferred_mode,            /* Deferred forkserver mode?        */
     fast_cal;                 /* Try to calibrate faster?         */
 
+static u8 seen_any_cov;
+
 static s32 out_fd,       /* Persistent fd for out_file       */
     dev_urandom_fd = -1, /* Persistent fd for /dev/urandom   */
     dev_null_fd = -1,    /* Persistent fd for /dev/null      */
@@ -148,8 +151,8 @@ static s32 forksrv_pid, /* PID of the fork server           */
     child_pid = -1,     /* PID of the fuzzed program        */
     out_dir_fd = -1;    /* FD of the lock file              */
 
-EXP_ST u8 *trace_bits; /* SHM with instrumentation bitmap  */
-EXP_ST u8 *virgin_bits; /* Regions yet untouched by fuzzing */
+EXP_ST u32 *trace_bits; /* SHM with instrumentation bitmap  */
+EXP_ST u32 *virgin_bits; /* Regions yet untouched by fuzzing */
 // EXP_ST u8 virgin_bits[MAP_SIZE], /* Regions yet untouched by fuzzing */
 //     virgin_tmout[MAP_SIZE],      /* Bits we haven't seen in tmouts   */
 //     virgin_crash[MAP_SIZE];      /* Bits we haven't seen in crashes  */
@@ -224,7 +227,7 @@ static u64 stage_finds[32], /* Patterns found per fuzz stage    */
 static u32 rand_cnt; /* Random number counter            */
 
 static u64 total_cal_us, /* Total calibration time (us)      */
-    total_cal_cycles;    /* Total calibration cycles         */
+    total_cal_cycles,    /* Total calibration cycles         */
     total_len;
 
 static u64 total_bitmap_size, /* Total bit count for all bitmaps  */
@@ -841,6 +844,7 @@ static void add_to_queue(u8 *fname, u32 len, u8 passed_det)
 
   queued_paths++;
   pending_not_fuzzed++;
+  score_changed = 1;
 
   cycles_wo_finds = 0;
 
@@ -893,7 +897,7 @@ EXP_ST void write_bitmap(void)
   if (fd < 0)
     PFATAL("Unable to open '%s'", fname);
 
-  ck_write(fd, virgin_bits, MAP_SIZE, fname);
+  ck_write(fd, virgin_bits, MAP_SIZE * sizeof(u32), fname);
 
   close(fd);
   ck_free(fname);
@@ -909,7 +913,7 @@ EXP_ST void read_bitmap(u8 *fname)
   if (fd < 0)
     PFATAL("Unable to open '%s'", fname);
 
-  ck_read(fd, virgin_bits, MAP_SIZE, fname);
+  ck_read(fd, virgin_bits, MAP_SIZE * sizeof(u32), fname);
 
   close(fd);
 }
@@ -1040,7 +1044,7 @@ static u32 count_bits(u8 *mem)
 
 static u32 count_bytes(u8 *mem)
 {
-
+  (void)mem;
   // u32 *ptr = (u32 *)mem;
   // u32 i = (MAP_SIZE >> 2);
   u32 ret = 0;
@@ -1360,7 +1364,7 @@ static void cull_trap_queue(void)
   queued_favored = 0;
   pending_favored = 0;
 
-  /* Pass 1: Welford's running mean and variance */
+  /* Pass 1: Welford mean/variance of fav_factor */
   double mean = 0.0, m2 = 0.0;
   u32 n = 0;
 
@@ -1373,37 +1377,28 @@ static void cull_trap_queue(void)
     m2 += delta * (x - mean);
   }
 
-  if (n < 2)
-    return;
+  double variance = n ? m2 / n : 0.0;
 
-  double variance = m2 / n; /* use (n - 1) for sample variance */
-  double sd = sqrt(variance);
-
-  /* Debug: count how many entries each threshold would flag */
-  u32 over1 = 0, over2 = 0;
+  /* Pass 2: everything is favored except entries more than 1 SD above the mean */
   for (q = queue; q; q = q->next)
   {
-    double f = fav_factor_of(q);
-    if (f > mean + sd)
-      over1++;
-    if (f > mean + 2.0 * sd)
-      over2++;
-  }
-  fprintf(stderr, "n=%u over1sd=%u over2sd=%u\n", n, over1, over2);
+    u8 fav = 1;
 
-  /* Pass 2: flag entries more than 1 SD from the mean */
-  for (q = queue; q; q = q->next)
-  {
-    double factor = fav_factor_of(q);
-    double d = factor - mean;
-    if (d * d > variance && factor > mean)
+    if (n >= 2)
     {
-      /* too far from the mean: do whatever you want here */
-      q->favored = 0;
-    } else {
-      q->favored = 1;
+      double d = fav_factor_of(q) - mean;
+      if (d > 0 && d * d > variance) /* d > sd, without sqrt */
+        fav = 0;
     }
-    mark_as_redundant(q, !q->favored);
+
+    q->favored = fav;
+    if (fav)
+    {
+      queued_favored++;
+      if (!q->was_fuzzed)
+        pending_favored++;
+    }
+    mark_as_redundant(q, !fav);
   }
 }
 
@@ -1480,7 +1475,7 @@ EXP_ST void setup_shm(void)
   if (!in_bitmap) {
   // we set virgin_bits using shm
     // memset(virgin_bits, 255, MAP_SIZE);
-    virgin_shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
+    virgin_shm_id = shmget(IPC_PRIVATE, MAP_SIZE * sizeof(u32), IPC_CREAT | IPC_EXCL | 0600);
     if (virgin_shm_id < 0)
       PFATAL("shmget() failed");
     virgin_shm_str = alloc_printf("%d", virgin_shm_id);
@@ -1495,7 +1490,7 @@ EXP_ST void setup_shm(void)
   // memset(virgin_crash, 255, MAP_SIZE);
 
   // shm_id = shmget(IPC_PRIVATE, MAP_SIZE, IPC_CREAT | IPC_EXCL | 0600);
-  shm_id = shmget(IPC_PRIVATE, MAP_SIZE_TRACE, IPC_CREAT | IPC_EXCL | 0600);
+  shm_id = shmget(IPC_PRIVATE, MAP_SIZE_TRACE * sizeof(u32), IPC_CREAT | IPC_EXCL | 0600);
 
   if (shm_id < 0)
     PFATAL("shmget() failed");
@@ -2126,6 +2121,15 @@ static void load_auto(void)
     OKF("No auto-generated dictionary tokens to reuse.");
 }
 
+static u32 count_virgin_entries(void)
+{
+  u32 i, ret = 0;
+  for (i = 0; i < MAP_SIZE; i++)
+    if (virgin_bits[i])
+      ret++;
+  return ret;
+}
+
 /* Destroy extras. */
 
 static void destroy_extras(void)
@@ -2467,7 +2471,7 @@ static u8 run_target(char **argv, u32 timeout)
      territory. */
 
   // memset(trace_bits, 0, MAP_SIZE);
-  memset(trace_bits, 0, MAP_SIZE_TRACE);
+  memset(trace_bits, 0, MAP_SIZE_TRACE * sizeof(u32));
   MEM_BARRIER();
 
   /* If we're running in "dumb" mode, we can't rely on the fork server
@@ -2759,10 +2763,10 @@ static void show_stats(void);
    new paths are discovered to detect variable behavior and so on. */
 
 static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
-                         u32 handicap, u8 from_queue)
+                         u32 handicap, u8 from_queue, u8 prior_hnb, u32 prior_cnt)
 {
 
-  static u8 first_trace[MAP_SIZE];
+  // static u8 first_trace[MAP_SIZE];
 
   // u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
   //    first_run = (q->exec_cksum == 0);
@@ -2773,6 +2777,8 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
   s32 old_sc = stage_cur, old_sm = stage_max;
   u32 use_tmout = exec_tmout;
   u8 *old_sn = stage_name;
+
+  u32 cov_cnt = prior_cnt;
 
   /* Be a bit more generous about timeouts when resuming sessions, or when
      trying to calibrate already-added finds. This helps avoid trouble due
@@ -2823,15 +2829,33 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
 
+    // if (stop_soon || fault != crash_mode)
+    //   goto abort_calibration;
+
+    // if (!dumb_mode && !stage_cur && !count_bytes(trace_bits))
+    // {
+    //   fault = FAULT_NOINST;
+    //   goto abort_calibration;
+    // }
+    // I added this in (makuo)
     if (stop_soon || fault != crash_mode)
       goto abort_calibration;
 
-    if (!dumb_mode && !stage_cur && !count_bytes(trace_bits))
+    if (!stage_cur)
     {
-      fault = FAULT_NOINST;
-      goto abort_calibration;
+      u32 c = count_bytes(trace_bits);
+      if (!cov_cnt)
+        cov_cnt = c; /* seeds: stage 0 is the real first run */
+
+      if (cov_cnt)
+        seen_any_cov = 1;
+      else if (!dumb_mode && !seen_any_cov)
+      {
+        fault = FAULT_NOINST; /* nothing has EVER been hit: really broken */
+        goto abort_calibration;
+      }
     }
-    // I added this in (makuo)
+
     hnb = has_new_traps();
     if (hnb > new_bits)
       new_bits = hnb;
@@ -2884,7 +2908,9 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
       // q->exec_us = (stop_us - start_us) / stage_max;
   q->exec_us = (stop_us - start_us) / (stage_max - 1);
-  q->bitmap_size = count_bytes(trace_bits);
+  // q->bitmap_size = count_bytes(trace_bits);
+  if (cov_cnt)
+    q->bitmap_size = cov_cnt;
   q->handicap = handicap;
   q->cal_failed = 0;
 
@@ -2987,7 +3013,9 @@ static void perform_dry_run(char **argv)
 
     close(fd);
 
-    res = calibrate_case(argv, q, use_mem, 0, 1);
+    // res = calibrate_case(argv, q, use_mem, 0, 1);
+    res = calibrate_case(argv, q, use_mem, 0, 1, 0, 0);
+
     ck_free(use_mem);
 
     if (stop_soon)
@@ -3413,27 +3441,23 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 {
 
   u8 *fn = "";
-  u8 hnb;
+  u8 hnb = 0;
   s32 fd;
   u8 keeping = 0, res;
+
+  /* Capture novelty BEFORE calibration re-runs the target and consumes it. */
+  u32 found_cnt = count_bytes(trace_bits);
 
   if (fault == crash_mode)
   {
 
-    /* Keep only if there are new bits in the map, add to queue for
-       future fuzzing, etc. */
+    /* Queue admission: keep only if this run hit previously unseen traps. */
     if (!(hnb = has_new_traps()))
     {
       if (crash_mode)
         total_crashes++;
       return 0;
     }
-    // if (!(hnb = has_new_bits(virgin_bits)))
-    // {
-    //   if (crash_mode)
-    //     total_crashes++;
-    //   return 0;
-    // }
 
 #ifndef SIMPLE_FILES
 
@@ -3454,12 +3478,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
       queued_with_cov++;
     }
 
-    // queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-
-    /* Try to calibrate inline; this also calls update_bitmap_score() when
-       successful. */
-
-    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
+    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0, hnb, found_cnt);
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
@@ -3478,11 +3497,6 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 
   case FAULT_TMOUT:
 
-    /* Timeouts are not very interesting, but we're still obliged to keep
-       a handful of samples. We use the presence of new bits in the
-       hang-specific bitmap as a signal of uniqueness. In "dumb" mode, we
-       just keep everything. */
-
     total_tmouts++;
 
     if (unique_hangs >= KEEP_UNIQUE_HANG)
@@ -3490,23 +3504,13 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 
     if (!dumb_mode)
     {
-
-// #ifdef WORD_SIZE_64
-//       simplify_trace((u64 *)trace_bits);
-// #else
-//       simplify_trace((u32 *)trace_bits);
-// #endif /* ^WORD_SIZE_64 */
       if (!has_new_traps())
         return keeping;
-      // if (!has_new_bits(virgin_tmout))
-      //   return keeping;
     }
 
     unique_tmouts++;
 
-    /* Before saving, we make sure that it's a genuine hang by re-running
-       the target with a more generous timeout (unless the default timeout
-       is already generous). */
+    /* Re-run with a more generous timeout to confirm it's a real hang. */
 
     if (exec_tmout < hang_tmout)
     {
@@ -3515,9 +3519,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
       write_to_testcase(mem, len);
       new_fault = run_target(argv, hang_tmout);
 
-      /* A corner case that one user reported bumping into: increasing the
-         timeout actually uncovers a crash. Make sure we don't discard it if
-         so. */
+      /* A longer timeout may uncover a crash; don't discard it. */
 
       if (!stop_soon && new_fault == FAULT_CRASH)
         goto keep_as_crash;
@@ -3548,28 +3550,12 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
 
   keep_as_crash:
 
-    /* This is handled in a manner roughly similar to timeouts,
-       except for slightly different limits and no need to re-run test
-       cases. */
+    /* Save every crash, regardless of new coverage (capped by KEEP_UNIQUE_CRASH). */
 
     total_crashes++;
 
     if (unique_crashes >= KEEP_UNIQUE_CRASH)
       return keeping;
-
-    if (!dumb_mode)
-    {
-
-// #ifdef WORD_SIZE_64
-//       simplify_trace((u64 *)trace_bits);
-// #else
-//       simplify_trace((u32 *)trace_bits);
-// #endif /* ^WORD_SIZE_64 */
-      if (!has_new_traps())
-        return keeping;
-      // if (!has_new_bits(virgin_crash))
-      //   return keeping;
-    }
 
     if (!unique_crashes)
       write_crash_readme();
@@ -3600,8 +3586,7 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     return keeping;
   }
 
-  /* If we're here, we apparently want to save the crash or hang
-     test case, too. */
+  /* Save the crash or hang test case. */
 
   fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
   if (fd < 0)
@@ -3850,13 +3835,14 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps)
 
   /* Fields in the file:
 
+
      unix_time, cycles_done, cur_path, paths_total, paths_not_fuzzed,
      favored_not_fuzzed, unique_crashes, unique_hangs, max_depth,
      execs_per_sec, total_execs */
 
   fprintf(plot_file,
           "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %llu, %llu\n",
-          get_cur_time() / 1000, queue_cycle - 1, current_entry, queued_paths,
+          (get_cur_time() - start_time) / 1000, queue_cycle - 1, current_entry, queued_paths,
           pending_not_fuzzed, pending_favored, bitmap_cvg, unique_crashes,
           unique_hangs, max_depth, eps, total_execs, total_tmouts);
 
@@ -4324,7 +4310,7 @@ static void show_stats(void)
 
   /* Do some bitmap stats. */
 
-  t_bytes = count_non_255_bytes(virgin_bits);
+  t_bytes = count_virgin_entries();
   t_byte_ratio = ((double)t_bytes * 100) / MAP_SIZE;
 
   if (t_bytes)
@@ -4368,7 +4354,7 @@ static void show_stats(void)
 
   /* Compute some mildly useful bitmap stats. */
 
-  t_bits = (MAP_SIZE << 3) - count_bits(virgin_bits);
+  t_bits = (MAP_SIZE << 3) - count_virgin_entries();
 
   /* Now, for the visuals... */
 
@@ -4887,130 +4873,130 @@ static u32 next_p2(u32 val)
    trimmer uses power-of-two increments somewhere between 1/16 and 1/1024 of
    file size, to keep the stage short and sweet. */
 
-// static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
-// {
+static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
+{
 
-//   static u8 tmp[64];
-//   static u8 clean_trace[MAP_SIZE];
+  static u8 tmp[64];
+  static u8 clean_trace[MAP_SIZE];
 
-//   u8 needs_write = 0, fault = 0;
-//   u32 trim_exec = 0;
-//   u32 remove_len;
-//   u32 len_p2;
+  u8 needs_write = 0, fault = 0;
+  u32 trim_exec = 0;
+  u32 remove_len;
+  u32 len_p2;
 
-//   /* Although the trimmer will be less useful when variable behavior is
-//      detected, it will still work to some extent, so we don't check for
-//      this. */
+  /* Although the trimmer will be less useful when variable behavior is
+     detected, it will still work to some extent, so we don't check for
+     this. */
 
-//   if (q->len < 5)
-//     return 0;
+  if (q->len < 5)
+    return 0;
 
-//   stage_name = tmp;
-//   bytes_trim_in += q->len;
+  stage_name = tmp;
+  bytes_trim_in += q->len;
 
-//   /* Select initial chunk len, starting with large steps. */
+  /* Select initial chunk len, starting with large steps. */
 
-//   len_p2 = next_p2(q->len);
+  len_p2 = next_p2(q->len);
 
-//   remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
+  remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
 
-//   /* Continue until the number of steps gets too high or the stepover
-//      gets too small. */
+  /* Continue until the number of steps gets too high or the stepover
+     gets too small. */
 
-//   while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES))
-//   {
+  while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES))
+  {
 
-//     u32 remove_pos = remove_len;
+    u32 remove_pos = remove_len;
 
-//     sprintf(tmp, "trim %s/%s", DI(remove_len), DI(remove_len));
+    sprintf(tmp, "trim %s/%s", DI(remove_len), DI(remove_len));
 
-//     stage_cur = 0;
-//     stage_max = q->len / remove_len;
+    stage_cur = 0;
+    stage_max = q->len / remove_len;
 
-//     while (remove_pos < q->len)
-//     {
+    // while (remove_pos < q->len)
+    // {
 
-//       u32 trim_avail = MIN(remove_len, q->len - remove_pos);
-//       u32 cksum;
+    //   u32 trim_avail = MIN(remove_len, q->len - remove_pos);
+    //   u32 cksum;
 
-//       write_with_gap(in_buf, q->len, remove_pos, trim_avail);
+    //   write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-//       fault = run_target(argv, exec_tmout);
-//       trim_execs++;
+    //   fault = run_target(argv, exec_tmout);
+    //   trim_execs++;
 
-//       if (stop_soon || fault == FAULT_ERROR)
-//         goto abort_trimming;
+    //   if (stop_soon || fault == FAULT_ERROR)
+    //     goto abort_trimming;
 
-//       /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
+    //   /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
 
-//       cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    //   cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
-//       /* If the deletion had no impact on the trace, make it permanent. This
-//          isn't perfect for variable-path inputs, but we're just making a
-//          best-effort pass, so it's not a big deal if we end up with false
-//          negatives every now and then. */
+      /* If the deletion had no impact on the trace, make it permanent. This
+         isn't perfect for variable-path inputs, but we're just making a
+         best-effort pass, so it's not a big deal if we end up with false
+         negatives every now and then. */
 
-//       if (cksum == q->exec_cksum)
-//       {
+    //   if (cksum == q->exec_cksum)
+    //   {
 
-//         u32 move_tail = q->len - remove_pos - trim_avail;
+    //     u32 move_tail = q->len - remove_pos - trim_avail;
 
-//         q->len -= trim_avail;
-//         len_p2 = next_p2(q->len);
+    //     q->len -= trim_avail;
+    //     len_p2 = next_p2(q->len);
 
-//         memmove(in_buf + remove_pos, in_buf + remove_pos + trim_avail,
-//                 move_tail);
+    //     memmove(in_buf + remove_pos, in_buf + remove_pos + trim_avail,
+    //             move_tail);
 
-//         /* Let's save a clean trace, which will be needed by
-//            update_bitmap_score once we're done with the trimming stuff. */
+    //     /* Let's save a clean trace, which will be needed by
+    //        update_bitmap_score once we're done with the trimming stuff. */
 
-//         if (!needs_write)
-//         {
+    //     if (!needs_write)
+    //     {
 
-//           needs_write = 1;
-//           memcpy(clean_trace, trace_bits, MAP_SIZE);
-//         }
-//       }
-//       else
-//         remove_pos += remove_len;
+    //       needs_write = 1;
+    //       memcpy(clean_trace, trace_bits, MAP_SIZE);
+    //     }
+    //   }
+    //   else
+    //     remove_pos += remove_len;
 
-//       /* Since this can be slow, update the screen every now and then. */
+    //   /* Since this can be slow, update the screen every now and then. */
 
-//       if (!(trim_exec++ % stats_update_freq))
-//         show_stats();
-//       stage_cur++;
-//     }
+    //   if (!(trim_exec++ % stats_update_freq))
+    //     show_stats();
+    //   stage_cur++;
+    // }
 
-//     remove_len >>= 1;
-//   }
+    remove_len >>= 1;
+  }
 
-//   /* If we have made changes to in_buf, we also need to update the on-disk
-//      version of the test case. */
+  /* If we have made changes to in_buf, we also need to update the on-disk
+     version of the test case. */
 
-//   if (needs_write)
-//   {
+  if (needs_write)
+  {
 
-//     s32 fd;
+    s32 fd;
 
-//     unlink(q->fname); /* ignore errors */
+    unlink(q->fname); /* ignore errors */
 
-//     fd = open(q->fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    fd = open(q->fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-//     if (fd < 0)
-//       PFATAL("Unable to create '%s'", q->fname);
+    if (fd < 0)
+      PFATAL("Unable to create '%s'", q->fname);
 
-//     ck_write(fd, in_buf, q->len, q->fname);
-//     close(fd);
+    ck_write(fd, in_buf, q->len, q->fname);
+    close(fd);
 
-//     memcpy(trace_bits, clean_trace, MAP_SIZE);
-//     update_bitmap_score(q);
-//   }
+    memcpy(trace_bits, clean_trace, MAP_SIZE);
+    update_bitmap_score(q);
+  }
 
-// abort_trimming:
+abort_trimming:
 
-//   bytes_trim_out += q->len;
-//   return fault;
-// }
+  bytes_trim_out += q->len;
+  return fault;
+}
 
 /* Write a modified test case, run program, process results. Handle
    error conditions, returning 1 if it's time to bail out. This is
@@ -5123,28 +5109,27 @@ static u32 choose_block_len(u32 limit)
 static u32 calculate_score(struct queue_entry *q)
 {
 
-  u32 avg_exec_us = total_cal_us / total_cal_cycles;
-  // u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
+  u32 avg_exec_us = total_cal_cycles ? (u32)(total_cal_us / total_cal_cycles) : 0;
   u32 perf_score = 100;
 
-  /* Adjust score based on execution speed of this path, compared to the
-     global average. Multiplier ranges from 0.1x to 3x. Fast inputs are
-     less expensive to fuzz, so we're giving them more air time. */
-
-  if (q->exec_us * 0.1 > avg_exec_us)
-    perf_score = 10;
-  else if (q->exec_us * 0.25 > avg_exec_us)
-    perf_score = 25;
-  else if (q->exec_us * 0.5 > avg_exec_us)
-    perf_score = 50;
-  else if (q->exec_us * 0.75 > avg_exec_us)
-    perf_score = 75;
-  else if (q->exec_us * 4 < avg_exec_us)
-    perf_score = 300;
-  else if (q->exec_us * 3 < avg_exec_us)
-    perf_score = 200;
-  else if (q->exec_us * 2 < avg_exec_us)
-    perf_score = 150;
+  /* No calibration data yet: nothing to compare against. */
+  if (avg_exec_us)
+  {
+    if (q->exec_us * 0.1 > avg_exec_us)
+      perf_score = 10;
+    else if (q->exec_us * 0.25 > avg_exec_us)
+      perf_score = 25;
+    else if (q->exec_us * 0.5 > avg_exec_us)
+      perf_score = 50;
+    else if (q->exec_us * 0.75 > avg_exec_us)
+      perf_score = 75;
+    else if (q->exec_us * 4 < avg_exec_us)
+      perf_score = 300;
+    else if (q->exec_us * 3 < avg_exec_us)
+      perf_score = 200;
+    else if (q->exec_us * 2 < avg_exec_us)
+      perf_score = 150;
+  }
 
   /* Adjust score based on bitmap size. The working theory is that better
      coverage translates to better targets. Multiplier from 0.25x to 3x. */
@@ -5161,8 +5146,9 @@ static u32 calculate_score(struct queue_entry *q)
   //   perf_score *= 0.5;
   // else if (q->bitmap_size * 1.5 < avg_bitmap_size)
   //   perf_score *= 0.75;
-  double avg_len = (total_len / queued_paths);
-  double len_ratio =  avg_len > 0 ? (double)q->len / avg_len : 1.0; /* <1 = shorter than average */
+
+  double avg_len = total_bitmap_entries ? (double)total_len / total_bitmap_entries : 0.0;
+  double len_ratio = avg_len > 0 ? (double)q->len / avg_len : 1.0;
 
   if (q->has_new_cov)
   {
@@ -5567,7 +5553,7 @@ static u8 fuzz_one(char **argv)
       // queue_cur->exec_cksum = 0;
       queue_cur->re_run_cal = 1;
 
-      res = calibrate_case(argv, queue_cur, in_buf, queue_cycle - 1, 0);
+      res = calibrate_case(argv, queue_cur, in_buf, queue_cycle - 1, 0, 0, 0);
 
       if (res == FAULT_ERROR)
         FATAL("Unable to execute target application");
@@ -7903,9 +7889,10 @@ EXP_ST void setup_dirs_fds(void)
   if (!plot_file)
     PFATAL("fdopen() failed");
 
-  fprintf(plot_file, "# unix_time, cycles_done, cur_path, paths_total, "
+  fprintf(plot_file, "# rel_time_s, cycles_done, cur_path, paths_total, "
                      "pending_total, pending_favs, map_size, unique_crashes, "
-                     "unique_hangs, max_depth, execs_per_sec\n");
+                     "unique_hangs, max_depth, execs_per_sec, total_execs, "
+                     "total_tmouts\n");
   /* ignore errors */
 }
 
@@ -8627,7 +8614,6 @@ int main(int argc, char **argv)
         FATAL("Multiple -B options not supported");
 
       in_bitmap = optarg;
-      read_bitmap(in_bitmap);
       break;
 
     case 'C': /* crash mode */
@@ -8744,6 +8730,9 @@ int main(int argc, char **argv)
 
   setup_post();
   setup_shm();
+  if (in_bitmap)
+    read_bitmap(in_bitmap);
+
   // init_count_class16();
 
   setup_dirs_fds();
