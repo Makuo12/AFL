@@ -14,12 +14,6 @@
 #include <sys/ucontext.h>
 #include <unistd.h>
 
-/* The writable-page table must survive every reset, so its nodes and bucket
- * table must come from the real allocator. Going through the wrapped malloc
- * would register them with the heap tracker, which frees them on reset and
- * leaves writable_pages dangling. These macros must precede the first
- * #include of uthash.h. */
-#include "uthash.h"
 #include "data.h"
 #include "config.h"
 #ifdef __APPLE__
@@ -51,14 +45,6 @@ typedef unsigned char u8;
 
 uint32_t *virgin_bits;
 uint32_t *trace_bits;
-
-typedef struct
-{
-    uintptr_t page;
-    UT_hash_handle hh;
-} writable_page;
-
-writable_page *writable_pages = NULL;
 
 #define DEFAULT_LOG_PATH "./output/trap_handler.log"
 static char log_path[4096] = DEFAULT_LOG_PATH;
@@ -124,7 +110,7 @@ static inline void record_hit(int32_t idx, uint32_t val, int is_loop)
     if (idx < 0 || idx >= MAP_SIZE)
     {
         sig_log("trap index out of range: ", (uintptr_t)(uint32_t)idx);
-        raise(SIGKILL);
+        abort();
     }
     uint32_t old = virgin_bits[idx];
     if (val <= old)
@@ -145,8 +131,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
     if (addr < 0x400000)
     {
         sig_log("addr underflow, base address assumption wrong: ", addr);
-        raise(SIGKILL);
-        return;
+        abort();
     }
 
     uintptr_t resume_addr = 0;
@@ -198,38 +183,15 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
     {
         sig_log("failed at addr=", addr);
         sig_log("            offset=", addr - 0x400000);
-        _exit(EXIT_FAILURE);
+        abort();
     }
 
     UC_PC(uc) = resume_addr;
 }
 
-void crash_handler(int sig, siginfo_t *info, void *ctx)
-{
-    ucontext_t *uc = (ucontext_t *)ctx;
-    uintptr_t rip = (uintptr_t)UC_PC(uc);
-
-    if (trace_bits)
-    {
-        /* Outside the main image (libc etc.) the address moves with ASLR,
-           so keep only the page offset, which is stable. */
-        if (rip < 0x400000 || rip > 0x10000000)
-            rip &= 0xfff;
-        trace_bits[1] = (uint32_t)rip;
-        trace_bits[2] = (uint32_t)sig;
-    }
-    sig_log("fatal signal, rip=", rip);
-}
-
-static char altstack[64 * 1024]; /* lets crash_handler run after a stack overflow */
 
 void setup_signal(void)
 {
-    stack_t ss;
-    ss.ss_sp = altstack;
-    ss.ss_size = sizeof(altstack);
-    ss.ss_flags = 0;
-    sigaltstack(&ss, NULL);
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -239,14 +201,6 @@ void setup_signal(void)
     sa.sa_sigaction = trap_handler;
     sa.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigaction(SIGTRAP, &sa, NULL);
-
-    // Crash handlers: run on the alternate stack, and a fault inside the
-    // handler itself falls through to the default action instead of recursing.
-    int sigs[] = {SIGSEGV, SIGILL, SIGBUS, SIGFPE, SIGABRT};
-    sa.sa_sigaction = crash_handler;
-    sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK | SA_RESETHAND;
-    for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++)
-        sigaction(sigs[i], &sa, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -292,12 +246,10 @@ void setup_shm(void)
 
 static void run_forkserver(char *argv0, char *input)
 {
-    uint32_t msg = 0;
-
-    /* If fd 199 isn't open we're not under afl-fuzz: run once and exit. */
+    uint32_t msg = 1;
     int standalone = (write(FORKSRV_FD + 1, &msg, 4) != 4);
 
-    char devnull[] = "/dev/null"; /* writable, in case the target modifies argv */
+    char devnull[] = "/dev/null";
     char *args[] = {argv0, input, devnull, NULL};
 
     for (;;)
@@ -308,18 +260,26 @@ static void run_forkserver(char *argv0, char *input)
             if (read(FORKSRV_FD, &cmd, 4) != 4)
                 _exit(0); /* afl went away */
         }
+
         pid_t child = fork();
         if (child == 0)
         {
             __reset_loop_counters();
-            optind = 0;
             int rc = target_main(3, args);
+            fflush(NULL);
             _exit(rc);
         }
         else if (child < 0)
         {
-            log_line("could not fork child");
-            exit(EXIT_FAILURE);
+            log_line("could not fork child\n");
+            _exit(1);
+        }
+
+        /* NEW: tell AFL the child's PID so it can kill it on timeout */
+        if (!standalone)
+        {
+            if (write(FORKSRV_FD + 1, &child, 4) != 4)
+                _exit(0);
         }
 
         int wait_status = 0;
@@ -331,15 +291,6 @@ static void run_forkserver(char *argv0, char *input)
                 _exit(1);
             }
         }
-
-        if (WIFSIGNALED(wait_status))
-            log_line("child %d killed by signal %d%s\n", child,
-                    WTERMSIG(wait_status),
-                    WCOREDUMP(wait_status) ? " (core dumped)" : "");
-        else if (WIFEXITED(wait_status))
-            log_line("child %d exited with code %d\n", child, WEXITSTATUS(wait_status));
-        else
-            log_line("child %d ended with unexpected status 0x%x\n", child, wait_status);
 
         if (standalone)
             exit(0);
@@ -478,8 +429,8 @@ static void collect_traps(void)
         int is_loop = (b[1] == 0x90 && b[2] == 0x90 &&
                        b[3] == 0x90 && b[4] == 0x90);
         uint32_t id = is_loop
-                          ? (b[5] | (b[6] << 8) | (b[7] << 16) | (b[8] << 24))
-                          : (b[1] | (b[2] << 8) | (b[3] << 16) | (b[4] << 24));
+                        ? (b[5] | (b[6] << 8) | (b[7] << 16) | ((uint32_t)b[8] << 24))
+                        : (b[1] | (b[2] << 8) | (b[3] << 16) | ((uint32_t)b[4] << 24));
 
         g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
         log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
