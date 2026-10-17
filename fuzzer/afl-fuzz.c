@@ -930,79 +930,79 @@ static inline u8 has_new_traps() {
   return (trace_bits[0] > 0 || trace_bits[3] > 0) ? 2 : 0;
 }
 
-static inline u8 has_new_bits(u8 *virgin_map)
-{
+// static inline u8 has_new_bits(u8 *virgin_map)
+// {
 
-#ifdef WORD_SIZE_64
+// #ifdef WORD_SIZE_64
 
-  u64 *current = (u64 *)trace_bits;
-  u64 *virgin = (u64 *)virgin_map;
+//   u64 *current = (u64 *)trace_bits;
+//   u64 *virgin = (u64 *)virgin_map;
 
-  u32 i = (MAP_SIZE >> 3);
+//   u32 i = (MAP_SIZE >> 3);
 
-#else
+// #else
 
-  u32 *current = (u32 *)trace_bits;
-  u32 *virgin = (u32 *)virgin_map;
+//   u32 *current = (u32 *)trace_bits;
+//   u32 *virgin = (u32 *)virgin_map;
 
-  u32 i = (MAP_SIZE >> 2);
+//   u32 i = (MAP_SIZE >> 2);
 
-#endif /* ^WORD_SIZE_64 */
+// #endif /* ^WORD_SIZE_64 */
 
-  u8 ret = 0;
+//   u8 ret = 0;
 
-  while (i--)
-  {
+//   while (i--)
+//   {
 
-    /* Optimize for (*current & *virgin) == 0 - i.e., no bits in current bitmap
-       that have not been already cleared from the virgin map - since this will
-       almost always be the case. */
+//     /* Optimize for (*current & *virgin) == 0 - i.e., no bits in current bitmap
+//        that have not been already cleared from the virgin map - since this will
+//        almost always be the case. */
 
-    if (unlikely(*current) && unlikely(*current & *virgin))
-    {
+//     if (unlikely(*current) && unlikely(*current & *virgin))
+//     {
 
-      if (likely(ret < 2))
-      {
+//       if (likely(ret < 2))
+//       {
 
-        u8 *cur = (u8 *)current;
-        u8 *vir = (u8 *)virgin;
+//         u8 *cur = (u8 *)current;
+//         u8 *vir = (u8 *)virgin;
 
-        /* Looks like we have not found any new bytes yet; see if any non-zero
-           bytes in current[] are pristine in virgin[]. */
+//         /* Looks like we have not found any new bytes yet; see if any non-zero
+//            bytes in current[] are pristine in virgin[]. */
 
-#ifdef WORD_SIZE_64
+// #ifdef WORD_SIZE_64
 
-        if ((cur[0] && vir[0] == 0xff) || (cur[1] && vir[1] == 0xff) ||
-            (cur[2] && vir[2] == 0xff) || (cur[3] && vir[3] == 0xff) ||
-            (cur[4] && vir[4] == 0xff) || (cur[5] && vir[5] == 0xff) ||
-            (cur[6] && vir[6] == 0xff) || (cur[7] && vir[7] == 0xff))
-          ret = 2;
-        else
-          ret = 1;
+//         if ((cur[0] && vir[0] == 0xff) || (cur[1] && vir[1] == 0xff) ||
+//             (cur[2] && vir[2] == 0xff) || (cur[3] && vir[3] == 0xff) ||
+//             (cur[4] && vir[4] == 0xff) || (cur[5] && vir[5] == 0xff) ||
+//             (cur[6] && vir[6] == 0xff) || (cur[7] && vir[7] == 0xff))
+//           ret = 2;
+//         else
+//           ret = 1;
 
-#else
+// #else
 
-        if ((cur[0] && vir[0] == 0xff) || (cur[1] && vir[1] == 0xff) ||
-            (cur[2] && vir[2] == 0xff) || (cur[3] && vir[3] == 0xff))
-          ret = 2;
-        else
-          ret = 1;
+//         if ((cur[0] && vir[0] == 0xff) || (cur[1] && vir[1] == 0xff) ||
+//             (cur[2] && vir[2] == 0xff) || (cur[3] && vir[3] == 0xff))
+//           ret = 2;
+//         else
+//           ret = 1;
 
-#endif /* ^WORD_SIZE_64 */
-      }
+// #endif /* ^WORD_SIZE_64 */
+//       }
 
-      *virgin &= ~*current;
-    }
+//       *virgin &= ~*current;
+//     }
 
-    current++;
-    virgin++;
-  }
+//     current++;
+//     virgin++;
+//   }
 
-  if (ret && virgin_map == virgin_bits)
-    bitmap_changed = 1;
+//   if (ret && virgin_map == virgin_bits)
+//     bitmap_changed = 1;
 
-  return ret;
-}
+//   return ret;
+// }
 
 /* Count the number of bits set in the provided bitmap. Used for the status
    screen several times every second, does not have to be fast. */
@@ -1277,19 +1277,19 @@ static void remove_shm(void)
    count information here. This is called only sporadically, for some
    new paths. */
 
-static void minimize_bits(u8 *dst, u8 *src)
-{
+// static void minimize_bits(u8 *dst, u8 *src)
+// {
 
-  u32 i = 0;
+//   u32 i = 0;
 
-  while (i < MAP_SIZE)
-  {
+//   while (i < MAP_SIZE)
+//   {
 
-    if (*(src++))
-      dst[i >> 3] |= 1 << (i & 7);
-    i++;
-  }
-}
+//     if (*(src++))
+//       dst[i >> 3] |= 1 << (i & 7);
+//     i++;
+//   }
+// }
 
 /* When we bump into a new path, we call this to see if the path appears
    more "favorable" than any of the existing ones. The purpose of the
@@ -1301,52 +1301,52 @@ static void minimize_bits(u8 *dst, u8 *src)
    for every byte in the bitmap. We win that slot if there is no previous
    contender, or if the contender has a more favorable speed x size factor. */
 
-static void update_bitmap_score(struct queue_entry *q)
-{
+// static void update_bitmap_score(struct queue_entry *q)
+// {
 
-  u32 i;
-  u64 fav_factor = q->exec_us * q->len;
+//   u32 i;
+//   u64 fav_factor = q->exec_us * q->len;
 
-  /* For every byte set in trace_bits[], see if there is a previous winner,
-     and how it compares to us. */
+//   /* For every byte set in trace_bits[], see if there is a previous winner,
+//      and how it compares to us. */
 
-  for (i = 0; i < MAP_SIZE; i++)
+//   for (i = 0; i < MAP_SIZE; i++)
 
-    if (trace_bits[i])
-    {
+//     if (trace_bits[i])
+//     {
 
-      if (top_rated[i])
-      {
+//       if (top_rated[i])
+//       {
 
-        /* Faster-executing or smaller test cases are favored. */
+//         /* Faster-executing or smaller test cases are favored. */
 
-        if (fav_factor > top_rated[i]->exec_us * top_rated[i]->len)
-          continue;
+//         if (fav_factor > top_rated[i]->exec_us * top_rated[i]->len)
+//           continue;
 
-        /* Looks like we're going to win. Decrease ref count for the
-           previous winner, discard its trace_bits[] if necessary. */
+//         /* Looks like we're going to win. Decrease ref count for the
+//            previous winner, discard its trace_bits[] if necessary. */
 
-        if (!--top_rated[i]->tc_ref)
-        {
-          ck_free(top_rated[i]->trace_mini);
-          top_rated[i]->trace_mini = 0;
-        }
-      }
+//         if (!--top_rated[i]->tc_ref)
+//         {
+//           ck_free(top_rated[i]->trace_mini);
+//           top_rated[i]->trace_mini = 0;
+//         }
+//       }
 
-      /* Insert ourselves as the new winner. */
+//       /* Insert ourselves as the new winner. */
 
-      top_rated[i] = q;
-      q->tc_ref++;
+//       top_rated[i] = q;
+//       q->tc_ref++;
 
-      if (!q->trace_mini)
-      {
-        q->trace_mini = ck_alloc(MAP_SIZE >> 3);
-        minimize_bits(q->trace_mini, trace_bits);
-      }
+//       if (!q->trace_mini)
+//       {
+//         q->trace_mini = ck_alloc(MAP_SIZE >> 3);
+//         minimize_bits(q->trace_mini, trace_bits);
+//       }
 
-      score_changed = 1;
-    }
-}
+//       score_changed = 1;
+//     }
+// }
 
 static inline double fav_factor_of(struct queue_entry *q)
 {
@@ -4874,130 +4874,130 @@ static u32 next_p2(u32 val)
    trimmer uses power-of-two increments somewhere between 1/16 and 1/1024 of
    file size, to keep the stage short and sweet. */
 
-static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
-{
+// static u8 trim_case(char **argv, struct queue_entry *q, u8 *in_buf)
+// {
 
-  static u8 tmp[64];
-  static u8 clean_trace[MAP_SIZE];
+//   static u8 tmp[64];
+//   static u8 clean_trace[MAP_SIZE];
 
-  u8 needs_write = 0, fault = 0;
-  u32 trim_exec = 0;
-  u32 remove_len;
-  u32 len_p2;
+//   u8 needs_write = 0, fault = 0;
+//   u32 trim_exec = 0;
+//   u32 remove_len;
+//   u32 len_p2;
 
-  /* Although the trimmer will be less useful when variable behavior is
-     detected, it will still work to some extent, so we don't check for
-     this. */
+//   /* Although the trimmer will be less useful when variable behavior is
+//      detected, it will still work to some extent, so we don't check for
+//      this. */
 
-  if (q->len < 5)
-    return 0;
+//   if (q->len < 5)
+//     return 0;
 
-  stage_name = tmp;
-  bytes_trim_in += q->len;
+//   stage_name = tmp;
+//   bytes_trim_in += q->len;
 
-  /* Select initial chunk len, starting with large steps. */
+//   /* Select initial chunk len, starting with large steps. */
 
-  len_p2 = next_p2(q->len);
+//   len_p2 = next_p2(q->len);
 
-  remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
+//   remove_len = MAX(len_p2 / TRIM_START_STEPS, TRIM_MIN_BYTES);
 
-  /* Continue until the number of steps gets too high or the stepover
-     gets too small. */
+//   /* Continue until the number of steps gets too high or the stepover
+//      gets too small. */
 
-  while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES))
-  {
+//   while (remove_len >= MAX(len_p2 / TRIM_END_STEPS, TRIM_MIN_BYTES))
+//   {
 
-    u32 remove_pos = remove_len;
+//     u32 remove_pos = remove_len;
 
-    sprintf(tmp, "trim %s/%s", DI(remove_len), DI(remove_len));
+//     sprintf(tmp, "trim %s/%s", DI(remove_len), DI(remove_len));
 
-    stage_cur = 0;
-    stage_max = q->len / remove_len;
+//     stage_cur = 0;
+//     stage_max = q->len / remove_len;
 
-    // while (remove_pos < q->len)
-    // {
+//     // while (remove_pos < q->len)
+//     // {
 
-    //   u32 trim_avail = MIN(remove_len, q->len - remove_pos);
-    //   u32 cksum;
+//     //   u32 trim_avail = MIN(remove_len, q->len - remove_pos);
+//     //   u32 cksum;
 
-    //   write_with_gap(in_buf, q->len, remove_pos, trim_avail);
+//     //   write_with_gap(in_buf, q->len, remove_pos, trim_avail);
 
-    //   fault = run_target(argv, exec_tmout);
-    //   trim_execs++;
+//     //   fault = run_target(argv, exec_tmout);
+//     //   trim_execs++;
 
-    //   if (stop_soon || fault == FAULT_ERROR)
-    //     goto abort_trimming;
+//     //   if (stop_soon || fault == FAULT_ERROR)
+//     //     goto abort_trimming;
 
-    //   /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
+//     //   /* Note that we don't keep track of crashes or hangs here; maybe TODO? */
 
-    //   cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+//     //   cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
-      /* If the deletion had no impact on the trace, make it permanent. This
-         isn't perfect for variable-path inputs, but we're just making a
-         best-effort pass, so it's not a big deal if we end up with false
-         negatives every now and then. */
+//       /* If the deletion had no impact on the trace, make it permanent. This
+//          isn't perfect for variable-path inputs, but we're just making a
+//          best-effort pass, so it's not a big deal if we end up with false
+//          negatives every now and then. */
 
-    //   if (cksum == q->exec_cksum)
-    //   {
+//     //   if (cksum == q->exec_cksum)
+//     //   {
 
-    //     u32 move_tail = q->len - remove_pos - trim_avail;
+//     //     u32 move_tail = q->len - remove_pos - trim_avail;
 
-    //     q->len -= trim_avail;
-    //     len_p2 = next_p2(q->len);
+//     //     q->len -= trim_avail;
+//     //     len_p2 = next_p2(q->len);
 
-    //     memmove(in_buf + remove_pos, in_buf + remove_pos + trim_avail,
-    //             move_tail);
+//     //     memmove(in_buf + remove_pos, in_buf + remove_pos + trim_avail,
+//     //             move_tail);
 
-    //     /* Let's save a clean trace, which will be needed by
-    //        update_bitmap_score once we're done with the trimming stuff. */
+//     //     /* Let's save a clean trace, which will be needed by
+//     //        update_bitmap_score once we're done with the trimming stuff. */
 
-    //     if (!needs_write)
-    //     {
+//     //     if (!needs_write)
+//     //     {
 
-    //       needs_write = 1;
-    //       memcpy(clean_trace, trace_bits, MAP_SIZE);
-    //     }
-    //   }
-    //   else
-    //     remove_pos += remove_len;
+//     //       needs_write = 1;
+//     //       memcpy(clean_trace, trace_bits, MAP_SIZE);
+//     //     }
+//     //   }
+//     //   else
+//     //     remove_pos += remove_len;
 
-    //   /* Since this can be slow, update the screen every now and then. */
+//     //   /* Since this can be slow, update the screen every now and then. */
 
-    //   if (!(trim_exec++ % stats_update_freq))
-    //     show_stats();
-    //   stage_cur++;
-    // }
+//     //   if (!(trim_exec++ % stats_update_freq))
+//     //     show_stats();
+//     //   stage_cur++;
+//     // }
 
-    remove_len >>= 1;
-  }
+//     // remove_len >>= 1;
+//   }
 
-  /* If we have made changes to in_buf, we also need to update the on-disk
-     version of the test case. */
+//   /* If we have made changes to in_buf, we also need to update the on-disk
+//      version of the test case. */
 
-  if (needs_write)
-  {
+//   if (needs_write)
+//   {
 
-    s32 fd;
+//     s32 fd;
 
-    unlink(q->fname); /* ignore errors */
+//     unlink(q->fname); /* ignore errors */
 
-    fd = open(q->fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
+//     fd = open(q->fname, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-    if (fd < 0)
-      PFATAL("Unable to create '%s'", q->fname);
+//     if (fd < 0)
+//       PFATAL("Unable to create '%s'", q->fname);
 
-    ck_write(fd, in_buf, q->len, q->fname);
-    close(fd);
+//     ck_write(fd, in_buf, q->len, q->fname);
+//     close(fd);
 
-    memcpy(trace_bits, clean_trace, MAP_SIZE);
-    update_bitmap_score(q);
-  }
+//     memcpy(trace_bits, clean_trace, MAP_SIZE);
+//     update_bitmap_score(q);
+//   }
 
-abort_trimming:
+// abort_trimming:
 
-  bytes_trim_out += q->len;
-  return fault;
-}
+//   bytes_trim_out += q->len;
+//   return fault;
+// }
 
 /* Write a modified test case, run program, process results. Handle
    error conditions, returning 1 if it's time to bail out. This is
@@ -5571,27 +5571,27 @@ static u8 fuzz_one(char **argv)
    * TRIMMING *
    ************/
 
-  if (!dumb_mode && !queue_cur->trim_done)
-  {
+  // if (!dumb_mode && !queue_cur->trim_done)
+  // {
 
-    u8 res = trim_case(argv, queue_cur, in_buf);
+  //   u8 res = trim_case(argv, queue_cur, in_buf);
 
-    if (res == FAULT_ERROR)
-      FATAL("Unable to execute target application");
+  //   if (res == FAULT_ERROR)
+  //     FATAL("Unable to execute target application");
 
-    if (stop_soon)
-    {
-      cur_skipped_paths++;
-      goto abandon_entry;
-    }
+  //   if (stop_soon)
+  //   {
+  //     cur_skipped_paths++;
+  //     goto abandon_entry;
+  //   }
 
-    /* Don't retry trimming, even if it failed. */
+  //   /* Don't retry trimming, even if it failed. */
 
-    queue_cur->trim_done = 1;
+  //   queue_cur->trim_done = 1;
 
-    if (len != queue_cur->len)
-      len = queue_cur->len;
-  }
+  //   if (len != queue_cur->len)
+  //     len = queue_cur->len;
+  // }
 
   memcpy(out_buf, in_buf, len);
 
