@@ -1042,7 +1042,7 @@ static u32 count_bits(u8 *mem)
    mostly to update the status screen or calibrate and examine confirmed
    new paths. */
 
-static u32 count_bytes(u8 *mem)
+static u32 count_bytes(u32 *mem)
 {
   (void)mem;
   // u32 *ptr = (u32 *)mem;
@@ -1269,8 +1269,8 @@ static inline void classify_counts(u32 *mem)
 
 static void remove_shm(void)
 {
-
   shmctl(shm_id, IPC_RMID, NULL);
+  shmctl(virgin_shm_id, IPC_RMID, NULL);
 }
 
 /* Compact trace bytes into a smaller bitmap. We effectively just drop the
@@ -1472,9 +1472,10 @@ EXP_ST void setup_shm(void)
   u8 *shm_str;
   u8 *virgin_shm_str;
 
-  if (!in_bitmap) {
-  // we set virgin_bits using shm
-    // memset(virgin_bits, 255, MAP_SIZE);
+  //  if (!in_bitmap) {
+  //  // we set virgin_bits using shm
+  //    // memset(virgin_bits, 255, MAP_SIZE);
+  //  }
     virgin_shm_id = shmget(IPC_PRIVATE, MAP_SIZE * sizeof(u32), IPC_CREAT | IPC_EXCL | 0600);
     if (virgin_shm_id < 0)
       PFATAL("shmget() failed");
@@ -1484,8 +1485,6 @@ EXP_ST void setup_shm(void)
     virgin_bits = shmat(virgin_shm_id, NULL, 0);
     if (virgin_bits== (void *)-1)
       PFATAL("shmat() failed");
-  }
-
   // memset(virgin_tmout, 255, MAP_SIZE);
   // memset(virgin_crash, 255, MAP_SIZE);
 
@@ -2770,7 +2769,8 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
 
   // u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
   //    first_run = (q->exec_cksum == 0);
-  u8 fault = 0, new_bits = 0, var_detected = 0, hnb = 0, first_run = (!q->was_fuzzed || q->re_run_cal);
+  u8 fault = 0, new_bits = prior_hnb, var_detected = 0, hnb = 0,
+     first_run = (!q->was_fuzzed || q->re_run_cal);
 
   u64 start_us, stop_us;
 
@@ -2923,7 +2923,7 @@ static u8 calibrate_case(char **argv, struct queue_entry *q, u8 *use_mem,
      parent. This is a non-critical problem, but something to warn the user
      about. */
 
-  if (!dumb_mode && first_run && !fault && !new_bits)
+  if (!dumb_mode && first_run && from_queue && !fault && !new_bits)
     fault = FAULT_NOBITS;
 
 abort_calibration:
@@ -3032,7 +3032,7 @@ static void perform_dry_run(char **argv)
 
       if (q == queue) {
         // check_map_coverage();
-        check_trap_coverage();
+        // check_trap_coverage();
       }
 
       if (crash_mode)
@@ -3454,11 +3454,12 @@ static u8 save_if_interesting(char **argv, void *mem, u32 len, u8 fault)
     /* Queue admission: keep only if this run hit previously unseen traps. */
     if (!(hnb = has_new_traps()))
     {
+      
       if (crash_mode)
         total_crashes++;
       return 0;
     }
-
+    bitmap_changed = 1;
 #ifndef SIMPLE_FILES
 
     fn = alloc_printf("%s/queue/id:%06u,%s", out_dir, queued_paths,
@@ -4354,7 +4355,7 @@ static void show_stats(void)
 
   /* Compute some mildly useful bitmap stats. */
 
-  t_bits = (MAP_SIZE << 3) - count_virgin_entries();
+  t_bits = t_bytes;
 
   /* Now, for the visuals... */
 
