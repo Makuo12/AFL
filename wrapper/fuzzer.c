@@ -496,8 +496,8 @@ static void make_pages_shared(void)
         }
     }
 
-    log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
-             npages, g_trap_count);
+    // log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
+    //          npages, g_trap_count);
 
     for (size_t i = 0; i < npages; i++)
         remap_page_shared(pages[i], pg);
