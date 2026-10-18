@@ -424,8 +424,8 @@ static void make_pages_shared(void)
         }
     }
 
-    log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
-             npages, g_trap_count);
+    // log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
+    //          npages, g_trap_count);
 
     for (size_t i = 0; i < npages; i++)
         remap_page_shared(pages[i], pg);
@@ -456,11 +456,11 @@ static void collect_traps(void)
                         : (b[1] | (b[2] << 8) | (b[3] << 16) | ((uint32_t)b[4] << 24));
 
         g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
-        log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
-                 i, g_traps[i].addr, g_traps[i].id, g_traps[i].is_loop);
+        // log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
+        //          i, g_traps[i].addr, g_traps[i].id, g_traps[i].is_loop);
     }
     g_trap_count = kept;
-    log_line("collected %zu trap sites\n", g_trap_count);
+    // log_line("collected %zu trap sites\n", g_trap_count);
 }
 
 int main(int argc, char **argv)
