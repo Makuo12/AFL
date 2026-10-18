@@ -2,12 +2,11 @@
 #SBATCH --job-name=de_forkserver_run
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
-#SBATCH --time=25:00:00
+#SBATCH --time=25:30:00
 #SBATCH --constraint=amd
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
-#SBATCH --exclusive
 #SBATCH --output=./logs/fuzz-%j.log
 #SBATCH --error=./logs/fuzz-%j.log
 #SBATCH --array=1-5
