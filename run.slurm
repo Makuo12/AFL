@@ -99,7 +99,7 @@ else
     export OUTPUT_HOME="$output"
     export META_DATA_FILE="$output/fuzzer_meta_data.txt"
     export LOOP_THRESHOLD_FILE="$output/fuzzer_loop_threshold.txt"
-    export DE_EDGE_MAX=2000
+    export DE_EDGE_MAX=3000
     export LOG_FILE="$OUTROOT/fuzzer_log_file"
     : > "$META_DATA_FILE"; : > "$LOOP_THRESHOLD_FILE"
 

@@ -259,6 +259,7 @@ void loadThresholds(unordered_set<int32_t> &metaIds,
 
     string line;
     int lineNo = 0;
+    int count = 0;
     while (getline(file, line))
     {
         ++lineNo;
@@ -281,9 +282,12 @@ void loadThresholds(unordered_set<int32_t> &metaIds,
             continue;
 
         auto it = thresholds.find(id);
-        if (it == thresholds.end() || it->second < cmp_value)
+        if (it == thresholds.end() || it->second < cmp_value) {
             thresholds[id] = cmp_value;
+            count++;
+        }
     }
+    errs() << "thresholdcount" << " count: " << count << "\n";
 }
 
 // Rewrites only the imm32 of the forced-imm32 "cmp eax, imm32" in the guard:
@@ -389,6 +393,7 @@ void loadData(unordered_set<int32_t> &metaIds, string &metaFile)
         return;
     }
     string line;
+    int count = 0;
     while (getline(file, line))
     {
         // eofbit after getline means the last line had no trailing '\n';
@@ -402,7 +407,9 @@ void loadData(unordered_set<int32_t> &metaIds, string &metaFile)
         if (end == line.c_str() || *end != '\0')
             continue;
         metaIds.insert(static_cast<int32_t>(v));
+        count++;
     }
+    errs() << "meta_id_count: " << count << "\n";
 }
 
 int writeToFile(Module &M, const char *outputFile)
