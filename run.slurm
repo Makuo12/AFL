@@ -2,14 +2,14 @@
 #SBATCH --job-name=de_forkserver_run
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
-#SBATCH --time=25:30:00
+#SBATCH --time=25:00:00
 #SBATCH --constraint=amd
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=8G
 #SBATCH --output=./logs/fuzz-%j.log
 #SBATCH --error=./logs/fuzz-%j.log
-#SBATCH --array=1-3
+#SBATCH --array=1-5
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ export AFL_DISABLE_TRIM=1
 export AFL_FAST_CAL=1                   # fewer calibration runs (3 instead of 4 on stable inputs)
 export AFL_NO_SYNC=1                    # don't import other instances' inputs
 
-FUZZ_SECONDS=$((2*60*60))
+FUZZ_SECONDS=$((24*60*60))
 TRACE="main.trace"
 PROGRAM="de_forkserver_afl"
 
