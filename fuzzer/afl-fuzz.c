@@ -3,7 +3,7 @@
 
   Licensed under the Apache License, Version 2.0 (the "License");
   you may not use this file except in compliance with the License.
-  You may obtain a copy of the License at:
+  You may obtain a /copy of the License at:
 
     http://www.apache.org/licenses/LICENSE-2.0
 
@@ -240,6 +240,14 @@ static s32 cpu_core_count; /* CPU core count                   */
 static s32 cpu_aff = -1; /* Selected CPU core                */
 
 #endif /* HAVE_AFFINITY */
+
+static u32 DE_EDGE_COUNT;      /* new edges since last de-instrumentation   */
+static u32 DE_EDGE_LOOP_COUNT; /* new loop buckets since last de-instrument. */
+static u32 DE_INSTRUMENTED;
+static u32 de_edge_max = 4000; /* DE_EDGE_MAX env                         */
+static u8 de_arc;              /* DE_EDGE_ARC env: bfd + image-base link  */
+static u8 de_enabled;          /* config validated at startup */
+static u8 *de_out_home, *de_meta, *de_thr, *de_clangxx, *de_base;
 
 static FILE *plot_file; /* Gnuplot output file              */
 
@@ -1348,90 +1356,59 @@ static void remove_shm(void)
 //     }
 // }
 
-#define FAVORED_PERCENT 20 /* share of the queue to mark favored, tune this */
-
-static int cmp_exec_us(const void *a, const void *b)
+static inline double fav_factor_of(struct queue_entry *q)
 {
-
-  const struct queue_entry *x = *(struct queue_entry *const *)a;
-  const struct queue_entry *y = *(struct queue_entry *const *)b;
-
-  if (x->exec_us != y->exec_us)
-    return x->exec_us < y->exec_us ? -1 : 1;
-  if (x->len != y->len)
-    return x->len < y->len ? -1 : 1;
-  return 0;
+  return (double)q->exec_us * (double)q->len * (q->has_new_cov ? 0.15 : 1.0);
 }
 
-static void cull_queue(void)
+static void cull_trap_queue(void)
 {
-
-  struct queue_entry *q, **arr;
-  u32 i, n = 0, want;
+  struct queue_entry *q;
 
   if (dumb_mode || !score_changed)
     return;
-
   score_changed = 0;
 
   queued_favored = 0;
   pending_favored = 0;
 
-  /* Collect usable entries and clear old flags. */
-
-  arr = ck_alloc(queued_paths * sizeof(struct queue_entry *));
+  /* Pass 1: Welford mean/variance of fav_factor */
+  double mean = 0.0, m2 = 0.0;
+  u32 n = 0;
 
   for (q = queue; q; q = q->next)
   {
-    q->favored = 0;
-    if (!q->cal_failed && q->exec_us)
-      arr[n++] = q;
+    double x = fav_factor_of(q);
+    double delta = x - mean;
+    n++;
+    mean += delta / n;
+    m2 += delta * (x - mean);
   }
 
-  /* Pass 1: the fastest / smallest FAVORED_PERCENT of the queue. */
+  double variance = n ? m2 / n : 0.0;
 
-  if (n)
+  /* Pass 2: everything is favored except entries more than 1 SD above the mean */
+  for (q = queue; q; q = q->next)
   {
+    u8 fav = 1;
 
-    qsort(arr, n, sizeof(struct queue_entry *), cmp_exec_us);
-
-    want = n * FAVORED_PERCENT / 100;
-    if (!want)
-      want = 1;
-
-    for (i = 0; i < want; i++)
+    if (n >= 2)
     {
+      double d = fav_factor_of(q) - mean;
+      if (d > 0 && d * d > variance) /* d > sd, without sqrt */
+        fav = 0;
+    }
 
-      arr[i]->favored = 1;
+    q->favored = fav;
+    if (fav)
+    {
       queued_favored++;
-      if (!arr[i]->was_fuzzed)
+      if (!q->was_fuzzed)
         pending_favored++;
     }
+    mark_as_redundant(q, !fav);
   }
-
-  /* Pass 2: any entry that found a new edge and has never been fuzzed
-     is favored regardless of speed, so a deep, slow find gets at least
-     one full pass before it can be deprioritized. Seeds (depth 1) are
-     excluded; they are already in the queue by definition. */
-
-  for (i = 0; i < n; i++)
-  {
-    q = arr[i];
-
-    if (!q->favored && q->has_new_cov && !q->was_fuzzed && q->depth >= 2)
-    {
-      q->favored = 1;
-      queued_favored++;
-      pending_favored++;
-    }
-  }
-
-  ck_free(arr);
-
-  for (q = queue; q; q = q->next)
-    mark_as_redundant(q, !q->favored);
 }
-
 
 /* The second part of the mechanism discussed above is a routine that
    goes over top_rated[] entries, and then sequentially grabs winners for
@@ -2675,6 +2652,15 @@ static u8 run_target(char **argv, u32 timeout)
 // #else
 //   classify_counts((u32 *)trace_bits);
 // #endif /* ^WORD_SIZE_64 */
+  /* Every execution (fuzzing, calibration, crash re-runs) funnels through
+     here, so this is the one place to tally what the harness newly reported:
+     trace_bits[0] = new edges, trace_bits[3] = new loop buckets. They must be
+     read before any later run_target() (e.g. calibration) clears them. */
+  if (tb4 != EXEC_FAIL_SIG)
+  {
+    DE_EDGE_COUNT += trace_bits[0];
+    DE_EDGE_LOOP_COUNT += trace_bits[3];
+  }
 
   prev_timed_out = child_timed_out;
 
@@ -5030,6 +5016,276 @@ static u32 next_p2(u32 val)
 //   return fault;
 // }
 
+static int run(char *const argv[])
+{
+  pid_t pid = fork();
+  if (pid < 0)
+  {
+    perror("fork");
+    return -1;
+  }
+  if (pid == 0)
+  {
+    execvp(argv[0], argv);
+    perror(argv[0]);
+    _exit(127); // never exit() in a forked child
+  }
+
+  int status;
+  if (waitpid(pid, &status, 0) < 0)
+  {
+    perror("waitpid");
+    return -1;
+  }
+
+  if (WIFSIGNALED(status))
+  {
+    int sig = WTERMSIG(status);
+    fprintf(stderr, "%s terminated by signal %d (%s)%s\n", argv[0], sig,
+            strsignal(sig), WCOREDUMP(status) ? " -- core dumped" : "");
+    return -1;
+  }
+  return (WIFEXITED(status) && WEXITSTATUS(status) == 0) ? 0 : -1;
+}
+
+/* Read and validate de-instrumentation config once. If anything is missing,
+   de-instrumentation is disabled with a warning instead of failing on every
+   attempt later (which would also stop the forkserver each time). */
+
+static void deinstr_setup(void)
+{
+  static const char *need[] = {"remove_edge", "main.transformed.ll",
+                               "fuzzer.bc", NULL};
+  u32 i;
+
+  if (getenv("DE_EDGE_MAX"))
+    de_edge_max = atoi(getenv("DE_EDGE_MAX"));
+  if (getenv("DE_EDGE_ARC"))
+    de_arc = 1;
+
+  de_out_home = getenv("OUTPUT_HOME");
+  de_meta = getenv("META_DATA_FILE");
+  de_thr = getenv("LOOP_THRESHOLD_FILE");
+  de_clangxx = getenv("DE_CLANGXX");
+  de_base = getenv("BASE_ADDRESS");
+  if (!de_clangxx)
+    de_clangxx = "clang++";
+  if (!de_base)
+    de_base = "0x400000";
+
+  if (!de_out_home || !de_meta || !de_thr)
+  {
+    WARNF("OUTPUT_HOME / META_DATA_FILE / LOOP_THRESHOLD_FILE not all set "
+          "- de-instrumentation DISABLED.");
+    return;
+  }
+
+  for (i = 0; need[i]; i++)
+  {
+    u8 *p = alloc_printf("%s/%s", de_out_home, need[i]);
+    if (access(p, R_OK))
+    {
+      WARNF("'%s' not readable - de-instrumentation DISABLED.", p);
+      ck_free(p);
+      return;
+    }
+    ck_free(p);
+  }
+
+  de_enabled = 1;
+  OKF("De-instrumentation enabled (threshold %u edges).", de_edge_max);
+}
+
+/* Returns 0 on success. Order of commits is chosen so every partial failure
+   is harmless:
+     1. remove_edge  old IR -> new_ll          (nothing committed)
+     2. relink       new_ll -> new_bin         (nothing committed)
+     3. promote IR   new_ll -> main.transformed.ll
+     4. swap binary  new_bin -> target_path
+   The IR is the source of truth and the binary is derived from it. If step 4
+   fails after step 3, the old binary keeps running, the next attempt rebuilds
+   from the already-reduced IR, and stale ids in the meta file are harmless. */
+
+static int remove_instrumentation(void)
+{
+  int ret = -1;
+
+  u8 *remove_edge_bin = alloc_printf("%s/remove_edge", de_out_home);
+  u8 *in_ll = alloc_printf("%s/main.transformed.ll", de_out_home);
+  u8 *new_ll = alloc_printf("%s/main.transformed.new.ll", de_out_home);
+  u8 *fuzz_bc = alloc_printf("%s/fuzzer.bc", de_out_home);
+  u8 *new_bin = alloc_printf("%s.new", target_path);
+  u8 *base_flag = alloc_printf("-Wl,--image-base=%s", de_base);
+
+  char *stage1[] = {remove_edge_bin, "-i", in_ll, "-m", de_meta,
+                    "-o", new_ll, "-l", de_thr, NULL};
+
+  char *stage2[32];
+  int n = 0;
+  stage2[n++] = de_clangxx;
+  stage2[n++] = "-O3";
+  stage2[n++] = "-funroll-loops";
+  stage2[n++] = "-DNDEBUG";
+  stage2[n++] = "-fno-stack-protector";
+  stage2[n++] = "-fomit-frame-pointer";
+  stage2[n++] = "-fno-semantic-interposition";
+  stage2[n++] = "-fvisibility=hidden";
+  stage2[n++] = new_ll;
+  stage2[n++] = fuzz_bc;
+  stage2[n++] = "-no-pie";
+  if (de_arc)
+  {
+    stage2[n++] = "-fuse-ld=bfd";
+    stage2[n++] = base_flag;
+    stage2[n++] = "-Wl,-z,noseparate-code";
+  }
+  stage2[n++] = "-o";
+  stage2[n++] = new_bin;
+  stage2[n] = NULL;
+
+  if (run(stage1))
+  {
+    WARNF("remove_edge failed");
+    goto out;
+  }
+  if (run(stage2))
+  {
+    WARNF("relink failed");
+    goto out;
+  }
+
+  /* Step 3: promote IR. If this fails nothing has changed yet. */
+  if (rename(new_ll, in_ll))
+  {
+    WARNF("could not promote IR '%s'", new_ll);
+    goto out;
+  }
+
+  /* Step 4: swap binary. rename() works even if the old inode is executing. */
+  if (rename(new_bin, target_path))
+  {
+    WARNF("could not install '%s' (IR already promoted; next try rebuilds "
+          "from it)",
+          new_bin);
+    goto out;
+  }
+
+  ret = 0;
+
+out:
+  if (ret)
+  {
+    unlink(new_bin);
+    unlink(new_ll);
+  } /* ignore errors */
+  ck_free(remove_edge_bin);
+  ck_free(in_ll);
+  ck_free(new_ll);
+  ck_free(fuzz_bc);
+  ck_free(new_bin);
+  ck_free(base_flag);
+  return ret;
+}
+
+/* Tear down the fork server so the target binary can be rewritten and
+   init_forkserver() can be called again. */
+
+static void stop_forkserver(void)
+{
+  static struct itimerval it; /* zeroed: disarm any pending SIGALRM */
+  setitimer(ITIMER_REAL, &it, NULL);
+
+  /* The fuzzed child is the forkserver's child, not ours, but we share a
+     uid so kill() works. Kill it first, otherwise it gets orphaned when
+     the forkserver dies (matters for persistent mode, where it can be
+     sitting stopped). */
+  if (child_pid > 0)
+    kill(child_pid, SIGKILL);
+
+  if (forksrv_pid > 0)
+  {
+    kill(forksrv_pid, SIGKILL);
+    if (waitpid(forksrv_pid, NULL, 0) <= 0)
+      WARNF("waitpid() on fork server failed");
+  }
+
+  /* Close our ends of the pipes, otherwise they leak on every restart. */
+  if (fsrv_ctl_fd > 0)
+    close(fsrv_ctl_fd);
+  if (fsrv_st_fd > 0)
+    close(fsrv_st_fd);
+  fsrv_ctl_fd = fsrv_st_fd = 0;
+
+  /* Reset state. forksrv_pid = 0 matters because calibrate_case() only
+     calls init_forkserver() when !forksrv_pid. child_pid = -1 is the
+     initial value that handle_timeout() expects. */
+  forksrv_pid = 0;
+  child_pid = -1;
+  child_timed_out = 0;
+
+  /* init_forkserver() treats EXEC_FAIL_SIG in trace_bits as "execv failed",
+     so make sure stale data from the last run can't trip that. */
+  memset(trace_bits, 0, MAP_SIZE_TRACE * sizeof(u32));
+}
+
+/* Truncate a harness-written file, creating it if missing so the harness can
+   always open it. Only call while no forkserver/child is alive. */
+
+static void clear_file(const u8 *path)
+{
+  s32 fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd < 0)
+  {
+    /* Not fatal: with the IR chained, stale ids/thresholds are harmless
+       (ids match nothing; thresholds equal what is already baked in). */
+    WARNF("Unable to clear '%s'", path);
+    return;
+  }
+  close(fd);
+}
+
+static void maybe_deinstrument(char **argv)
+{
+  /* In dumb / no-forkserver mode every run execv()s target_path afresh, so
+     there is no server to stop or restart. */
+  u8 use_fsrv = !(dumb_mode == 1 || no_forkserver);
+
+  if (!de_enabled || DE_EDGE_COUNT + DE_EDGE_LOOP_COUNT <= de_edge_max)
+    return;
+
+  ACTF("De-instrumenting (%u new edges, %u loop buckets)...",
+       DE_EDGE_COUNT, DE_EDGE_LOOP_COUNT);
+
+  if (use_fsrv)
+    stop_forkserver(); /* no writers from here on */
+
+  if (remove_instrumentation() == 0)
+  {
+    OKF("De-instrumentation done, restarting.");
+
+    /* Success only: the batch is now baked into the new binary and the
+       promoted IR. */
+    clear_file(de_meta);
+    clear_file(de_thr);
+
+    DE_EDGE_COUNT = 0;
+    DE_EDGE_LOOP_COUNT = 0;
+    DE_INSTRUMENTED = 1;
+  }
+  else
+  {
+    /* Old binary kept. Meta/threshold files are NOT cleared, so the same
+       batch plus anything new is retried next time. */
+    WARNF("De-instrumentation failed, continuing with old binary.");
+    de_edge_max *= 2; /* don't retry on every exec */
+  }
+
+  /* Clearing happens above, before this point. init_forkserver() is FATAL on
+     failure, so there is no state worth preserving past it. */
+  if (use_fsrv)
+    init_forkserver(argv);
+}
+
 /* Write a modified test case, run program, process results. Handle
    error conditions, returning 1 if it's time to bail out. This is
    a helper function for fuzz_one(). */
@@ -5077,12 +5333,16 @@ EXP_ST u8 common_fuzz_stuff(char **argv, u8 *out_buf, u32 len)
     return 1;
   }
 
+
   /* This handles FAULT_ERROR for us: */
 
   queued_discovered += save_if_interesting(argv, out_buf, len, fault);
 
   if (!(stage_cur % stats_update_freq) || stage_cur + 1 == stage_max)
     show_stats();
+  
+  // perform de-instrumentation
+  maybe_deinstrument(argv);
 
   return 0;
 }
@@ -5471,6 +5731,8 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le)
 
   return 0;
 }
+
+
 
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
@@ -8785,6 +9047,7 @@ int main(int argc, char **argv)
     setup_stdio_file();
 
   check_binary(argv[optind]);
+  deinstr_setup();
 
   start_time = get_cur_time();
 

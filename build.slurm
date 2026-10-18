@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=forkserver_build
+#SBATCH --job-name=de_forkserver_build
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
 #SBATCH --constraint=amd
@@ -18,7 +18,7 @@ if [ "${1:-}" = "arc" ]; then
     module load GCCcore/14.3.0
     pip install --user wllvm
     export PATH="$HOME/.local/bin:$PATH"
-    wrap="$HOME/forkserver/AFL"
+    wrap="$HOME/de_forkserver/AFL"
     export BASE_ADDRESS=0x400000
 else
     export LLVM_CC_NAME=clang-20        # ← pin to version 20
@@ -99,7 +99,7 @@ $BIN_PATH/clang++ $wrap/src/EdgeCount.cc $wrap/src/EdgeHandler.cc \
     $(llvm-config --cxxflags --ldflags --libs core irreader analysis) \
     $(llvm-config --system-libs) $PERF_FLAGS
 
-$BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc $wrap/src/DeEdgeHandler.cc \
+$BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc \
     -I include -o $wrap/output/remove_edge \
     $(llvm-config --cxxflags --ldflags --libs core irreader analysis) \
     $(llvm-config --system-libs) $PERF_FLAGS
@@ -112,21 +112,20 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     $BIN_PATH/clang++  $INCLUDE  \
         $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
         -L/opt/homebrew/opt/fontconfig/lib -lfontconfig \
-        -o $wrap/output/main.oracle
+        -o $wrap/output/main.trace
 elif [[ "$(uname -s)" == "Linux" ]]; then
     if [[ "${1:-}" = arc ]]; then
         $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
             $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
-            -o $wrap/output/main.oracle
+            -o $wrap/output/main.trace
     else
         $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
             $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie \
-            -o $wrap/output/main.oracle
+            -o $wrap/output/main.trace
     fi
-    cp  $wrap/output/main.oracle $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass.
 else
     echo "Unknown OS: $(uname -s)"
     exit 1
