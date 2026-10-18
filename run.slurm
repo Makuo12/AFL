@@ -96,10 +96,10 @@ fi
 rc=0
 if [[ "${1:-}" = "arc" ]]; then
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 6000 -m 4096 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 4096 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 else
     timeout -s INT "$FUZZ_SECONDS" ./fuzzer/afl-fuzz -d -i "$SEED_DIR" -o "$OUTROOT" \
-    -t 6000 -m 4096 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
+    -t 5000 -m 4096 -- "$SUT_ORACLE" "${SUT_ARGS[@]}" || rc=$?
 fi
 echo "afl-fuzz exited with code $rc"
 
