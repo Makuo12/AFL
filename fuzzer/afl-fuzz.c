@@ -259,7 +259,8 @@ struct queue_entry
       var_behavior, /* Variable behavior?               */
       favored,      /* Currently favored?               */
       fs_redundant, /* Marked as redundant in the fs?   */
-      re_run_cal;
+      re_run_cal,
+      productive;
 
   u32 bitmap_size; /* Number of bits set in bitmap     */
       // exec_cksum;  /* Checksum of the execution trace  */
@@ -303,6 +304,8 @@ static u8 *(*post_handler)(u8 *buf, u32 *len);
 static s8 interesting_8[] = {INTERESTING_8};
 static s16 interesting_16[] = {INTERESTING_8, INTERESTING_16};
 static s32 interesting_32[] = {INTERESTING_8, INTERESTING_16, INTERESTING_32};
+
+#define HEAVY_HAVOC_CEIL 64 /* a productive heavy entry can grow to this many execs */
 
 /* Fuzzing stages */
 
@@ -1348,14 +1351,24 @@ static void remove_shm(void)
 //     }
 // }
 
-static inline double fav_factor_of(struct queue_entry *q)
+#define CULL_K (-0.25)  /* cutoff = mean + K*sd in log-cost space; lower = stricter */
+#define CULL_W_TIME 1.0 /* weight on log(exec_us) */
+#define CULL_W_LEN 1.0  /* weight on log(len)     */
+
+static inline double cost_of(struct queue_entry *q)
 {
-  return (double)q->exec_us * (double)q->len * (q->has_new_cov ? 0.15 : 1.0);
+  double c = CULL_W_TIME * log((double)q->exec_us + 1.0) +
+             CULL_W_LEN * log((double)q->len + 1.0);
+  if (q->has_new_cov)
+    c += log(0.15); /* same 0.15x bonus as before */
+  return c;
 }
 
 static void cull_trap_queue(void)
 {
-  struct queue_entry *q;
+  struct queue_entry *q, *best = NULL;
+  double mean = 0.0, m2 = 0.0, best_c = 0.0, sd, thr;
+  u32 n = 0;
 
   if (dumb_mode || !score_changed)
     return;
@@ -1364,39 +1377,34 @@ static void cull_trap_queue(void)
   queued_favored = 0;
   pending_favored = 0;
 
-  /* Pass 1: Welford mean/variance of fav_factor */
-  double mean = 0.0, m2 = 0.0;
-  u32 n = 0;
-
   for (q = queue; q; q = q->next)
   {
-    double x = fav_factor_of(q);
+    double x = cost_of(q);
     double delta = x - mean;
     n++;
     mean += delta / n;
     m2 += delta * (x - mean);
+    if (!best || x < best_c)
+    {
+      best = q;
+      best_c = x;
+    }
   }
 
-  double variance = n ? m2 / n : 0.0;
+  sd = n > 1 ? sqrt(m2 / n) : 0.0;
+  thr = mean + CULL_K * sd;
 
-  /* Pass 2: everything is favored except entries more than 1 SD above the mean */
   for (q = queue; q; q = q->next)
   {
-    u8 fav = 1;
-
-    if (n >= 2)
-  {
-      double d = fav_factor_of(q) - mean;
-      if (d > 0 && d * d > variance) /* d > sd, without sqrt */
-        fav = 0;
-    }
+    /* always keep the single cheapest entry so the favored set is never empty */
+    u8 fav = (n < 2) || q == best || cost_of(q) <= thr;
 
     q->favored = fav;
     if (fav)
     {
       queued_favored++;
       if (!q->was_fuzzed)
-      pending_favored++;
+        pending_favored++;
     }
     mark_as_redundant(q, !fav);
   }
@@ -5441,6 +5449,23 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le)
   return 0;
 }
 
+#define SLOW_MULT 3.0        /* slow  if exec_us > 3x average            */
+#define LARGE_MULT 2.0       /* large if len     > 2x average            */
+#define HEAVY_HAVOC_MAX 8    /* max havoc execs for a heavy entry         */
+#define HEAVY_REVISIT_PCT 90 /* % chance to skip a heavy, already-fuzzed entry */
+
+static u8 is_heavy_entry(struct queue_entry *q)
+{
+  u64 avg_us = total_cal_cycles ? total_cal_us / total_cal_cycles : 0;
+  double avg_len = total_bitmap_entries ? (double)total_len / total_bitmap_entries : 0.0;
+
+  if (avg_us && (double)q->exec_us > (double)avg_us * SLOW_MULT)
+    return 1;
+  if (avg_len > 0 && (double)q->len > avg_len * LARGE_MULT)
+    return 1;
+  return 0;
+}
+
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
@@ -5452,6 +5477,8 @@ static u8 fuzz_one(char **argv)
   u8 *in_buf, *out_buf, *orig_in, *ex_tmp, *eff_map = 0;
   u64 havoc_queued, orig_hit_cnt, new_hit_cnt;
   u32 splice_cycle = 0, perf_score = 100, orig_perf, prev_cksum, eff_cnt = 1;
+  u8 heavy = 0;
+  u32 paths_at_start = queued_paths;
 
   u8 ret_val = 1, doing_det = 0;
 
@@ -5470,35 +5497,28 @@ static u8 fuzz_one(char **argv)
 
   if (pending_favored)
   {
-
-    /* If we have any favored, non-fuzzed new arrivals in the queue,
-       possibly skip to them at the expense of already-fuzzed or non-favored
-       cases. */
-
     if ((queue_cur->was_fuzzed || !queue_cur->favored) &&
         UR(100) < SKIP_TO_NEW_PROB)
       return 1;
   }
   else if (!dumb_mode && !queue_cur->favored && queued_paths > 10)
   {
-
-    /* Otherwise, still possibly skip non-favored cases, albeit less often.
-       The odds of skipping stuff are higher for already-fuzzed inputs and
-       lower for never-fuzzed entries. */
-
     if (queue_cycle > 1 && !queue_cur->was_fuzzed)
     {
-
       if (UR(100) < SKIP_NFAV_NEW_PROB)
         return 1;
     }
     else
     {
-
       if (UR(100) < SKIP_NFAV_OLD_PROB)
         return 1;
     }
   }
+
+  heavy = is_heavy_entry(queue_cur);
+  if (heavy && queue_cur->was_fuzzed && !queue_cur->productive &&
+      UR(100) < HEAVY_REVISIT_PCT)
+    return 1;
 
 #endif /* ^IGNORE_FINDS */
 
@@ -6688,6 +6708,9 @@ havoc_stage:
   if (stage_max < HAVOC_MIN)
     stage_max = HAVOC_MIN;
 
+  if (heavy && stage_max > HEAVY_HAVOC_MAX)
+    stage_max = HEAVY_HAVOC_MAX;
+
   temp_len = len;
 
   orig_hit_cnt = queued_paths + unique_crashes;
@@ -7117,8 +7140,16 @@ havoc_stage:
 
     if (queued_paths != havoc_queued)
     {
-
-      if (perf_score <= HAVOC_MAX_MULT * 100)
+      if (heavy)
+      {
+        if (stage_max < HEAVY_HAVOC_CEIL)
+        {
+          stage_max *= 2;
+          if (stage_max > HEAVY_HAVOC_CEIL)
+            stage_max = HEAVY_HAVOC_CEIL;
+        }
+      }
+      else if (perf_score <= HAVOC_MAX_MULT * 100)
       {
         stage_max *= 2;
         perf_score *= 2;
@@ -7154,7 +7185,8 @@ havoc_stage:
 
 retry_splicing:
 
-  if (use_splicing && splice_cycle++ < SPLICE_CYCLES &&
+  if (use_splicing && (!heavy || queued_paths > paths_at_start) &&
+      splice_cycle++ < SPLICE_CYCLES &&
       queued_paths > 1 && queue_cur->len > 1)
   {
 
@@ -7255,6 +7287,7 @@ abandon_entry:
   /* Update pending_not_fuzzed count if we made it through the calibration
      cycle and have not seen this entry before. */
 
+  queue_cur->productive = (queued_paths > paths_at_start);
   if (!stop_soon && !queue_cur->cal_failed && !queue_cur->was_fuzzed)
   {
     queue_cur->was_fuzzed = 1;
