@@ -1348,90 +1348,59 @@ static void remove_shm(void)
 //     }
 // }
 
-#define FAVORED_PERCENT 20 /* share of the queue to mark favored, tune this */
-
-static int cmp_exec_us(const void *a, const void *b)
+static inline double fav_factor_of(struct queue_entry *q)
 {
-
-  const struct queue_entry *x = *(struct queue_entry *const *)a;
-  const struct queue_entry *y = *(struct queue_entry *const *)b;
-
-  if (x->exec_us != y->exec_us)
-    return x->exec_us < y->exec_us ? -1 : 1;
-  if (x->len != y->len)
-    return x->len < y->len ? -1 : 1;
-  return 0;
+  return (double)q->exec_us * (double)q->len * (q->has_new_cov ? 0.15 : 1.0);
 }
 
-static void cull_queue(void)
+static void cull_trap_queue(void)
 {
-
-  struct queue_entry *q, **arr;
-  u32 i, n = 0, want;
+  struct queue_entry *q;
 
   if (dumb_mode || !score_changed)
     return;
-
   score_changed = 0;
 
   queued_favored = 0;
   pending_favored = 0;
 
-  /* Collect usable entries and clear old flags. */
-
-  arr = ck_alloc(queued_paths * sizeof(struct queue_entry *));
+  /* Pass 1: Welford mean/variance of fav_factor */
+  double mean = 0.0, m2 = 0.0;
+  u32 n = 0;
 
   for (q = queue; q; q = q->next)
   {
-    q->favored = 0;
-    if (!q->cal_failed && q->exec_us)
-      arr[n++] = q;
+    double x = fav_factor_of(q);
+    double delta = x - mean;
+    n++;
+    mean += delta / n;
+    m2 += delta * (x - mean);
   }
 
-  /* Pass 1: the fastest / smallest FAVORED_PERCENT of the queue. */
+  double variance = n ? m2 / n : 0.0;
 
-  if (n)
+  /* Pass 2: everything is favored except entries more than 1 SD above the mean */
+  for (q = queue; q; q = q->next)
   {
+    u8 fav = 1;
 
-    qsort(arr, n, sizeof(struct queue_entry *), cmp_exec_us);
-
-    want = n * FAVORED_PERCENT / 100;
-    if (!want)
-      want = 1;
-
-    for (i = 0; i < want; i++)
-    {
-
-      arr[i]->favored = 1;
-      queued_favored++;
-      if (!arr[i]->was_fuzzed)
-        pending_favored++;
+    if (n >= 2)
+  {
+      double d = fav_factor_of(q) - mean;
+      if (d > 0 && d * d > variance) /* d > sd, without sqrt */
+        fav = 0;
     }
-  }
 
-  /* Pass 2: any entry that found a new edge and has never been fuzzed
-     is favored regardless of speed, so a deep, slow find gets at least
-     one full pass before it can be deprioritized. Seeds (depth 1) are
-     excluded; they are already in the queue by definition. */
-
-  for (i = 0; i < n; i++)
-  {
-    q = arr[i];
-
-    if (!q->favored && q->has_new_cov && !q->was_fuzzed && q->depth >= 2)
+    q->favored = fav;
+    if (fav)
     {
-      q->favored = 1;
       queued_favored++;
+      if (!q->was_fuzzed)
       pending_favored++;
     }
+    mark_as_redundant(q, !fav);
   }
-
-  ck_free(arr);
-
-  for (q = queue; q; q = q->next)
-    mark_as_redundant(q, !q->favored);
 }
-
 
 /* The second part of the mechanism discussed above is a routine that
    goes over top_rated[] entries, and then sequentially grabs winners for
