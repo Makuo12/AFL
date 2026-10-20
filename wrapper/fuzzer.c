@@ -40,6 +40,8 @@ extern const struct mach_header_64 _mh_execute_header;
 // extern void __reset_loop_counters(void);
 extern int target_main(int argc, char **argv);
 extern void __reset_loop_counters(void) __attribute__((weak));
+void log_line(const char *fmt, ...);
+static void sig_log(const char *msg, uintptr_t val);
 
 typedef unsigned char u8;
 
