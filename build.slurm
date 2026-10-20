@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=forkserver_build
+#SBATCH --job-name=control_build
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
 #SBATCH --constraint=amd
@@ -18,11 +18,11 @@ if [ "${1:-}" = "arc" ]; then
     module load GCCcore/14.3.0
     pip install --user wllvm
     export PATH="$HOME/.local/bin:$PATH"
-    wrap="$HOME/forkserver/AFL"
+    wrap="$HOME/control/AFL"
     export BASE_ADDRESS=0x400000
 else
-    export LLVM_CC_NAME=clang-20        # ← pin to version 20
-    export LLVM_CXX_NAME=clang++-20     # ← pin to version 20
+    export LLVM_CC_NAME=clang-20        # pin to version 20
+    export LLVM_CXX_NAME=clang++-20     # pin to version 20
     wrap=$(pwd)
     export BASE_ADDRESS=0x400000
 fi
@@ -104,32 +104,42 @@ $BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc $wrap/src/DeEdgeHandler.cc \
     $(llvm-config --cxxflags --ldflags --libs core irreader analysis) \
     $(llvm-config --system-libs) $PERF_FLAGS
 
-$wrap/output/edge "$wrap/output/out.ll" "$wrap/output/main.transformed.ll"
+# Coverage types understood by the edge tool (COVERAGE_TYPE env var):
+#   block -> BLOCK_COVERAGE
+#   edge  -> EDGE_COVERAGE
+#   all   -> ALL_COVERAGE (edge + loop counters)
+declare -A COV=( [block]=BLOCK_COVERAGE [edge]=EDGE_COVERAGE [all]=ALL_COVERAGE )
+TYPES=(block edge all)
 
-echo "Building final binary"
-if [[ "$(uname -s)" == "Darwin" ]]; then
-    INCLUDE="-isysroot $(xcrun --show-sdk-path)"
-    $BIN_PATH/clang++  $INCLUDE  \
-        $wrap/output/main.transformed.ll $wrap/output/fuzzer.bc \
-        -L/opt/homebrew/opt/fontconfig/lib -lfontconfig \
-        -o $wrap/output/main.oracle
-elif [[ "$(uname -s)" == "Linux" ]]; then
-    if [[ "${1:-}" = arc ]]; then
-        $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
-            $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
-            -no-pie -fuse-ld=bfd \
-            -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
-            -o $wrap/output/main.oracle
+for t in "${TYPES[@]}"; do
+    echo "Instrumenting: $t (${COV[$t]})"
+    COVERAGE_TYPE="${COV[$t]}" $wrap/output/edge \
+        "$wrap/output/out.ll" "$wrap/output/main.$t.ll"
+done
+
+echo "Building final binaries"
+case "$(uname -s)" in
+  Darwin)
+    LINK_FLAGS=(-isysroot "$(xcrun --show-sdk-path)"
+                -L/opt/homebrew/opt/fontconfig/lib -lfontconfig)
+    ;;
+  Linux)
+    if [[ "${1:-}" = "arc" ]]; then
+        LINK_FLAGS=(-no-pie -fuse-ld=bfd
+                    -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code)
     else
-        $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
-            $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
-            -no-pie \
-            -o $wrap/output/main.oracle
+        LINK_FLAGS=(-no-pie)
     fi
-    cp  $wrap/output/main.oracle $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass.
-else
-    echo "Unknown OS: $(uname -s)"
-    exit 1
-fi
+    ;;
+  *) echo "Unknown OS: $(uname -s)"; exit 1 ;;
+esac
+
+for t in "${TYPES[@]}"; do
+    echo "Linking main.$t"
+    $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
+        $wrap/output/main.$t.ll $wrap/output/fuzzer.bc \
+        "${LINK_FLAGS[@]}" \
+        -o $wrap/output/main.$t
+done
 
 echo "Done with build"

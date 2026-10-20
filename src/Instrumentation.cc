@@ -10,6 +10,11 @@ using namespace std;
 
 using namespace llvm;
 
+#define COVERAGE_TYPE "COVERAGE_TYPE"
+#define BLOCK_COVERAGE "BLOCK_COVERAGE"
+#define EDGE_COVERAGE "EDGE_COVERAGE"
+#define ALL_COVERAGE "ALL_COVERAGE"
+
 std::vector<std::string> skipFunctions = {
     // runtime / pctable
     "__runtime",
@@ -164,12 +169,14 @@ bool foundInSkipFunctions(StringRef fName)
     return false;
 }
 
-void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
+void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen, string &coverageType)
 {
     int wholeCount = 0;
     // Create up front so a harness declaring
     // `extern "C" void __reset_loop_counters()` links even with 0 loops.
-    getOrCreateResetFn(M);
+    if (coverageType == ALL_COVERAGE) {
+        getOrCreateResetFn(M);
+    }
 
     // ---- Phase 1: edge handlers, all functions ----
     // These split blocks / edges, so they run BEFORE we count loop headers.
@@ -178,35 +185,48 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen)
         if (!shouldProcessFunction(F))
             continue;
         instrumentBlocks(F, seen, wholeCount);
-        for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
-        for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleIfEdges(*BB.getTerminator(), wholeCount, seen);
-        for (BasicBlock &BB : llvm::make_early_inc_range(F))
-            handleInvokeEdges(*BB.getTerminator(), wholeCount, seen);
+        if (coverageType == ALL_COVERAGE || coverageType == EDGE_COVERAGE) {
+            for (BasicBlock &BB : llvm::make_early_inc_range(F))
+                handleSwitchFallthroughEdge(*BB.getTerminator(), wholeCount, seen);
+            for (BasicBlock &BB : llvm::make_early_inc_range(F))
+                handleIfEdges(*BB.getTerminator(), wholeCount, seen);
+            for (BasicBlock &BB : llvm::make_early_inc_range(F))
+                handleInvokeEdges(*BB.getTerminator(), wholeCount, seen);
+        }
     }
-    // ---- Phase 2: count loop headers, create the array + reset body ----
-    unsigned N = countLoopHeaders(M);
-    GlobalVariable *CounterArr = nullptr;
-    if (N > 0)
-    {
-        CounterArr = createCounterArray(M, N);
-        buildResetFn(M, CounterArr, N);
+    if (coverageType == ALL_COVERAGE) {
+        // ---- Phase 2: count loop headers, create the array + reset body ----
+        unsigned N = countLoopHeaders(M);
+        GlobalVariable *CounterArr = nullptr;
+        if (N > 0)
+        {
+            CounterArr = createCounterArray(M, N);
+            buildResetFn(M, CounterArr, N);
+        }
+
+        // ---- Phase 3: loop guards, then block instrumentation, per function ----
+        // Same per-function order as before (loops, then instrumentBlocks).
+        unsigned slot = 0;
+        for (Function &F : M)
+        {
+            if (!shouldProcessFunction(F))
+                continue;
+            if (CounterArr)
+                processLoop(&F, CounterArr, slot, wholeCount);
+        }
+        assert(slot == N && "loop count and loop instrumentation disagree");
     }
 
-    // ---- Phase 3: loop guards, then block instrumentation, per function ----
-    // Same per-function order as before (loops, then instrumentBlocks).
-    unsigned slot = 0;
-    for (Function &F : M)
-    {
-        if (!shouldProcessFunction(F))
-            continue;
-        if (CounterArr)
-            processLoop(&F, CounterArr, slot, wholeCount);
-        // Handle PCTable
-    }
-    assert(slot == N && "loop count and loop instrumentation disagree");
+}
 
+void setupEnv(string &coverageType) {
+    coverageType = getenv(COVERAGE_TYPE);
+    if (coverageType.empty()) {
+        errs() << "No Trap Type Set! \n";
+        exit(EXIT_FAILURE);
+    } else {
+        errs() << "Coverage type: " << coverageType << "\n";
+    }
 }
 
 
@@ -261,6 +281,8 @@ int main(int argc, char **argv)
     // Sanity check the IR is still well-formed after the transform
     // mainCountBlock(*M, blocks);
     // errs() << "Done counting blocks and critical edges.\n";
-    processBlocks(*M, seen);
+    string coverageType;
+    setupEnv(coverageType);
+    processBlocks(*M, seen, coverageType);
     return writeToFile(*M, outputFile);
 }
