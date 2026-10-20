@@ -39,7 +39,7 @@ extern const struct mach_header_64 _mh_execute_header;
 
 // extern void __reset_loop_counters(void);
 extern int target_main(int argc, char **argv);
-extern void __reset_loop_counters(void);
+extern void __reset_loop_counters(void) __attribute__((weak));
 
 typedef unsigned char u8;
 
@@ -55,6 +55,21 @@ static void init_log_path(void)
     if (p && *p && strlen(p) < sizeof(log_path))
     {
         strcpy(log_path, p);
+    }
+}
+
+static int g_reset_loops = 0;
+
+static void parse_coverage(const char *s)
+{
+    if (!strcmp(s, "all"))
+        g_reset_loops = 1; /* only "all" resets loop counters */
+    else if (!strcmp(s, "block") || !strcmp(s, "edge"))
+        g_reset_loops = 0;
+    else
+    {
+        log_line("unknown coverage type '%s' (use block|edge|all)\n", s);
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -277,7 +292,8 @@ static void run_forkserver(char *argv0, char *input)
         {
             close(FORKSRV_FD); /* don't hold afl's pipes open */
             close(FORKSRV_FD + 1);
-            __reset_loop_counters();
+            if (g_reset_loops && __reset_loop_counters)
+                __reset_loop_counters();
             int rc = target_main(3, args);
             fflush(NULL);
             _exit(rc);
@@ -457,9 +473,11 @@ int main(int argc, char **argv)
     init_log_path();
     if (argc < 2)
     {
-        log_line("usage: harness <input_file>\n");
+        log_line("usage: harness <input_file> [all|edge|loop]\n");
         exit(EXIT_FAILURE);
     }
+    if (argc >= 3)
+        parse_coverage(argv[2]);
 
     collect_traps();
     make_pages_shared(); // <-- add this

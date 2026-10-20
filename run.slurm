@@ -51,9 +51,18 @@ else
 fi
 
 case "$TYPE" in
-    block) export COVERAGE_TYPE=BLOCK_COVERAGE ;;
-    edge)  export COVERAGE_TYPE=EDGE_COVERAGE ;;
-    all)   export COVERAGE_TYPE=ALL_COVERAGE ;;
+    block) 
+    export COVERAGE_TYPE=BLOCK_COVERAGE 
+    SUT_ARGS=(@@ block /dev/null)
+    ;;
+    edge)  
+    export COVERAGE_TYPE=EDGE_COVERAGE 
+    SUT_ARGS=(@@ edge /dev/null)
+    ;;
+    all)   
+    export COVERAGE_TYPE=ALL_COVERAGE 
+    SUT_ARGS=(@@ all /dev/null)
+    ;;
     *) echo "Unknown coverage type: $TYPE" >&2; exit 1 ;;
 esac
 
@@ -81,7 +90,6 @@ if [[ "${1:-}" = "arc" ]]; then
     RESULTS_DIR="$output/results"           # persistent results
     export LOOP_THRESHOLD_FILE="$OUTROOT/loop_threshold.txt"
     SUT="$output/$SUT_NAME"
-    SUT_ARGS=(@@ /dev/null)
     export LOG_FILE="$OUTROOT/fuzzer_log_file"
     mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR"
     cp -rf "$wrap/testcases/pdf/." "$tmp_input/"
@@ -103,7 +111,6 @@ else
     RESULTS_DIR="$output/results"
 
     SUT="$output/$SUT_NAME"
-    SUT_ARGS=(@@ /dev/null)
 
     mkdir -p "$tmp_input" "$OUTROOT" "$RESULTS_DIR"
     cp -rf "$wrap/testcases/pdf/." "$tmp_input/"
