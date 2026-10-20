@@ -421,3 +421,51 @@ static void make_pages_shared(void)
     remap_pages_shared(pages, u, pg);
     free(pages);
 }
+
+static void collect_traps(void)
+{
+    size_t n = (size_t)(__stop___traps - __start___traps);
+    g_traps = malloc(n * sizeof(trap_entry));
+    if (!g_traps)
+    {
+        log_line("collect_traps: oom\n");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t kept = 0;
+    for (size_t i = 0; i < n; i++)
+    {
+        void *addr = __start___traps[i];
+        unsigned char *b = (unsigned char *)addr;
+
+        int is_loop = (b[1] == 0x90 && b[2] == 0x90 &&
+                       b[3] == 0x90 && b[4] == 0x90);
+        uint32_t id = is_loop
+                        ? (b[5] | (b[6] << 8) | (b[7] << 16) | ((uint32_t)b[8] << 24))
+                        : (b[1] | (b[2] << 8) | (b[3] << 16) | ((uint32_t)b[4] << 24));
+
+        g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
+        // log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
+        //          i, g_traps[i].addr, g_traps[i].id, g_traps[i].is_loop);
+    }
+    g_trap_count = kept;
+    // log_line("collected %zu trap sites\n", g_trap_count);
+}
+
+int main(int argc, char **argv)
+{
+    init_log_path();
+    if (argc < 2)
+    {
+        log_line("usage: harness <input_file>\n");
+        exit(EXIT_FAILURE);
+    }
+
+    collect_traps();
+    make_pages_shared(); // <-- add this
+
+    setup_shm();
+    setup_signal();
+    run_forkserver(argv[0], argv[1]);
+    return 0;
+}
