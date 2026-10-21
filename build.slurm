@@ -129,7 +129,7 @@ MEM_WRAP_FLAGS="-Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wra
                 -Wl,--wrap=strdup -Wl,--wrap=strndup \
                 -Wl,--wrap=getline -Wl,--wrap=getdelim"
 
-WRAP_FLAGS="$FILE_WRAP_FLAGS $MEM_WRAP_FLAGS $FILE_WRAP_FLAGS"
+WRAP_FLAGS="$FILE_WRAP_FLAGS $MEM_WRAP_FLAGS $EXIT_WRAP_FLAGS"
 
 echo "Building final binary"
 if [[ "$(uname -s)" == "Darwin" ]]; then
