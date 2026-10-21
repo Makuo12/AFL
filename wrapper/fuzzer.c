@@ -349,54 +349,39 @@ typedef struct
 static trap_entry *g_traps;
 static size_t g_trap_count;
 
-static int cmp_up(const void *a, const void *b)
+static void remap_page_shared(uintptr_t page_addr, long pg)
 {
-    uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
-    return (x > y) - (x < y);
-}
-
-/* pages[] must be sorted ascending and unique. */
-static void remap_pages_shared(const uintptr_t *pages, size_t npages, long pg)
-{
-    if (npages == 0)
-        return;
-
     int fd = memfd_create("text_shared", 0);
-    if (fd < 0 || ftruncate(fd, (off_t)(npages * (size_t)pg)) != 0)
+    if (fd < 0)
     {
-        log_line("memfd setup failed: %s\n", strerror(errno));
+        log_line("memfd_create failed for %p\n", (void *)page_addr);
         exit(EXIT_FAILURE);
     }
 
-    /* Copy all page contents first, while the originals are still mapped. */
-    for (size_t i = 0; i < npages; i++)
+    if (ftruncate(fd, pg) != 0)
     {
-        if (pwrite(fd, (void *)pages[i], pg, (off_t)(i * (size_t)pg)) != pg)
-        {
-            log_line("pwrite failed for %p: %s\n", (void *)pages[i], strerror(errno));
+        log_line("ftruncate failed for %p\n", (void *)page_addr);
+        close(fd);
             exit(EXIT_FAILURE);
-        }
     }
 
-    /* Map each run of address-adjacent pages with one mmap call. */
-    for (size_t i = 0; i < npages;)
+    ssize_t written = write(fd, (void *)page_addr, pg);
+    if (written != pg)
     {
-        size_t j = i + 1;
-        while (j < npages && pages[j] == pages[j - 1] + (uintptr_t)pg)
-            j++;
+        log_line("short write copying page %p (%zd/%ld)\n", (void *)page_addr, written, pg);
+        close(fd);
+        exit(EXIT_FAILURE);
+    }
 
-        void *r = mmap((void *)pages[i], (j - i) * (size_t)pg,
-                       PROT_READ | PROT_WRITE | PROT_EXEC,
-                       MAP_SHARED | MAP_FIXED, fd, (off_t)(i * (size_t)pg));
+    void *r = mmap((void *)page_addr, pg, PROT_READ | PROT_WRITE | PROT_EXEC,
+                   MAP_SHARED | MAP_FIXED, fd, 0);
+    close(fd); // mapping holds its own reference; fd not needed after mmap
+
         if (r == MAP_FAILED)
         {
-            log_line("mmap MAP_FIXED failed for %p (%zu pages): %s\n",
-                     (void *)pages[i], j - i, strerror(errno));
+        log_line("mmap MAP_FIXED failed for %p\n", (void *)page_addr);
             exit(EXIT_FAILURE);
-        }
-        i = j;
     }
-    close(fd); /* mappings hold their own reference */
 }
 
 static void make_pages_shared(void)
@@ -404,9 +389,15 @@ static void make_pages_shared(void)
     long pg = sysconf(_SC_PAGESIZE);
     uintptr_t pgmask = ~(uintptr_t)(pg - 1);
 
-    const uintptr_t span0 = 5; // 0xcc + 4 id bytes
-    const uintptr_t span1 = 9; // 0xcc + 4 marker bytes + 4 id bytes
+    // Each trap's full on-disk span: 0xcc + 4 id bytes (category 0),
+    // or 0xcc + 4 marker bytes + 4 id bytes (category 1, loop headers).
+    // Any byte in that span may be overwritten for de-instrumentation,
+    // so every page touched by the span — not just the page containing
+    // the first byte — must be remapped shared.
+    const uintptr_t span0 = 5; // 1 (0xcc) + 4 (id)
+    const uintptr_t span1 = 9; // 1 (0xcc) + 4 (marker) + 4 (id)
 
+    // Worst case: every trap touches 2 distinct pages (start + end).
     uintptr_t *pages = malloc(2 * g_trap_count * sizeof(uintptr_t));
     if (!pages)
     {
@@ -414,29 +405,49 @@ static void make_pages_shared(void)
         exit(EXIT_FAILURE);
     }
 
-    size_t n = 0;
+    size_t npages = 0;
     for (size_t i = 0; i < g_trap_count; i++)
     {
+        // uintptr_t start = (uintptr_t)g_traps[i].addr;
         uintptr_t addr = (uintptr_t)g_traps[i].addr;
+
+        uintptr_t span = g_traps[i].is_loop ? span1 : span0;
+        // uintptr_t end = start + span - 1; // last byte actually belonging to this trap
+
         uintptr_t start = addr - (g_traps[i].is_loop ? 7 : 0);
-        uintptr_t end = addr + (g_traps[i].is_loop ? span1 : span0) - 1;
+        uintptr_t end = addr + span - 1;
 
-        uintptr_t first = start & pgmask;
-        uintptr_t last = end & pgmask;
+        uintptr_t base_start = start & pgmask;
+        uintptr_t base_end = end & pgmask;
 
-        pages[n++] = first;
-        if (last != first)
-            pages[n++] = last;
+        // base_start is always needed; base_end only differs (and is only
+        // needed) if the trap's tail bytes crossed into the next page.
+        uintptr_t candidates[2] = {base_start, base_end};
+        int ncand = (base_start == base_end) ? 1 : 2;
+
+        for (int c = 0; c < ncand; c++)
+        {
+            uintptr_t base = candidates[c];
+            int dup = 0;
+            for (size_t j = 0; j < npages; j++)
+            {
+                if (pages[j] == base)
+                {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (!dup)
+                pages[npages++] = base;
+        }
     }
 
-    /* Sort, then drop duplicates. */
-    qsort(pages, n, sizeof(*pages), cmp_up);
-    size_t u = 0;
-    for (size_t i = 0; i < n; i++)
-        if (u == 0 || pages[i] != pages[u - 1])
-            pages[u++] = pages[i];
+    // log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
+    //          npages, g_trap_count);
 
-    remap_pages_shared(pages, u, pg);
+    for (size_t i = 0; i < npages; i++)
+        remap_page_shared(pages[i], pg);
+
     free(pages);
 }
 
