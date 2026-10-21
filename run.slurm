@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=forkserver_run
+#SBATCH --job-name=single_server_run
 #SBATCH --partition=normal_q
 #SBATCH --account=fuzzing
 #SBATCH --time=25:30:00
@@ -9,7 +9,7 @@
 #SBATCH --mem-per-cpu=4G
 #SBATCH --output=./logs/fuzz-%j.log
 #SBATCH --error=./logs/fuzz-%j.log
-#SBATCH --array=1-3
+#SBATCH --array=1-5
 
 set -euo pipefail
 
@@ -28,7 +28,7 @@ export AFL_NO_SYNC=1                    # don't import other instances' inputs
 FUZZ_SECONDS=$((24*60*60))
 TRACE="main.trace"
 ORACLE="main.oracle"
-PROGRAM="forkserver_afl"
+PROGRAM="single_server_afl"
 
 
 if [[ "${1:-}" = "arc" ]]; then
@@ -37,8 +37,8 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}_${SLURM_ARRAY_TASK_ID:-0}"
     FULL_ID="${PROGRAM}_${ID}"
 
-    wrap="$HOME/forkserver/AFL"      # same as build
-    runner="$wrap/forkserver_runner"
+    wrap="$HOME/single_server/AFL"      # same as build
+    runner="$wrap/single_server_runner"
     mkdir -p "$runner"
 
     output="$runner/output_${ID}"                # per-task copy
@@ -47,7 +47,7 @@ module load LLVM/20.1.8-GCCcore-14.3.0
     cp -r "$wrap/output/." "$output/"      # everything: binaries, .bc, .ll, edge, remove_edge, ...
 
     tmp_base="${TMPDIR:-/tmp}"
-    tmp_input="$tmp_base/forkserver_${FULL_ID}"
+    tmp_input="$tmp_base/single_server_${FULL_ID}"
     OUTROOT="$tmp_base/$FULL_ID"            # node-local fuzzer output (wiped at job end)
     RESULTS_DIR="$output/results"             # persistent results
     export LOOP_THRESHOLD_FILE="$OUTROOT/loop_threshold.txt"
@@ -68,14 +68,14 @@ else
     wrap=$(pwd)
 
     ID="local_$(date +%s)_$$"
-    FULL_ID="${PROGRAM:-forkserver}_${ID}"
+    FULL_ID="${PROGRAM:-single_server}_${ID}"
 
     output="$wrap/output_$ID"
     mkdir -p "$output"
     cp -r "$wrap/output/." "$output/"
 
     tmp_base="/tmp"
-    tmp_input="$tmp_base/forkserver_${FULL_ID}"
+    tmp_input="$tmp_base/single_server_${FULL_ID}"
     OUTROOT="$tmp_base/$FULL_ID"
     RESULTS_DIR="$output/results"
 

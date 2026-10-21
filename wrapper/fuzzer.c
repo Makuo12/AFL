@@ -255,14 +255,14 @@ void setup_shm(void)
     trace_bits = attach_shm(SHM_ENV_VAR, MAP_SIZE_TRACE);
 }
 
-static void run_forkserver(char *argv0, char *input)
+static void run_persisent(char *argv0, char *input)
 {
     uint32_t msg = 1;
     int standalone = !getenv(SHM_ENV_VAR) || write(FORKSRV_FD + 1, &msg, 4) != 4;
 
     char devnull[] = "/dev/null";
     char *args[] = {argv0, input, devnull, NULL};
-
+    int isActive = 0;
     for (;;)
     {
         if (!standalone)
@@ -272,21 +272,21 @@ static void run_forkserver(char *argv0, char *input)
                 _exit(0); /* afl went away */
         }
 
-        pid_t child = fork();
-        if (child == 0)
+        // pid_t child = fork();
+        if (isActive)
         {
-            close(FORKSRV_FD); /* don't hold afl's pipes open */
-            close(FORKSRV_FD + 1);
+            // close(FORKSRV_FD); /* don't hold afl's pipes open */
+            // close(FORKSRV_FD + 1);
             __reset_loop_counters();
             int rc = target_main(3, args);
             fflush(NULL);
             _exit(rc);
         }
-        else if (child < 0)
-        {
-            log_line("could not fork child\n");
-            _exit(1);
-        }
+        // else if (child < 0)
+        // {
+        //     log_line("could not fork child\n");
+        //     _exit(1);
+        // }
 
         /* NEW: tell AFL the child's PID so it can kill it on timeout */
         if (!standalone)
@@ -296,14 +296,14 @@ static void run_forkserver(char *argv0, char *input)
         }
 
         int wait_status = 0;
-        while (waitpid(child, &wait_status, 0) < 0)
-        {
-            if (errno != EINTR)
-            {
-                log_line("waitpid: %s\n", strerror(errno));
-                _exit(1);
-            }
-        }
+        // while (waitpid(child, &wait_status, 0) < 0)
+        // {
+        //     if (errno != EINTR)
+        //     {
+        //         log_line("waitpid: %s\n", strerror(errno));
+        //         _exit(1);
+        //     }
+        // }
 
         if (standalone)
         {
@@ -318,150 +318,6 @@ static void run_forkserver(char *argv0, char *input)
     }
 }
 
-extern void *__start___traps[];
-extern void *__stop___traps[];
-
-typedef struct
-{
-    void *addr;
-    uint32_t id;
-    int is_loop;
-} trap_entry;
-
-static trap_entry *g_traps;
-static size_t g_trap_count;
-
-static void remap_page_shared(uintptr_t page_addr, long pg)
-{
-    int fd = memfd_create("text_shared", 0);
-    if (fd < 0)
-    {
-        log_line("memfd_create failed for %p\n", (void *)page_addr);
-        exit(EXIT_FAILURE);
-    }
-
-    if (ftruncate(fd, pg) != 0)
-    {
-        log_line("ftruncate failed for %p\n", (void *)page_addr);
-        close(fd);
-        exit(EXIT_FAILURE);
-    }
-
-    ssize_t written = write(fd, (void *)page_addr, pg);
-    if (written != pg)
-    {
-        log_line("short write copying page %p (%zd/%ld)\n", (void *)page_addr, written, pg);
-        close(fd);
-        exit(EXIT_FAILURE);
-    }
-
-    void *r = mmap((void *)page_addr, pg, PROT_READ | PROT_WRITE | PROT_EXEC,
-                   MAP_SHARED | MAP_FIXED, fd, 0);
-    close(fd); // mapping holds its own reference; fd not needed after mmap
-
-    if (r == MAP_FAILED)
-    {
-        log_line("mmap MAP_FIXED failed for %p\n", (void *)page_addr);
-        exit(EXIT_FAILURE);
-    }
-}
-
-static void make_pages_shared(void)
-{
-    long pg = sysconf(_SC_PAGESIZE);
-    uintptr_t pgmask = ~(uintptr_t)(pg - 1);
-
-    // Each trap's full on-disk span: 0xcc + 4 id bytes (category 0),
-    // or 0xcc + 4 marker bytes + 4 id bytes (category 1, loop headers).
-    // Any byte in that span may be overwritten for de-instrumentation,
-    // so every page touched by the span — not just the page containing
-    // the first byte — must be remapped shared.
-    const uintptr_t span0 = 5; // 1 (0xcc) + 4 (id)
-    const uintptr_t span1 = 9; // 1 (0xcc) + 4 (marker) + 4 (id)
-
-    // Worst case: every trap touches 2 distinct pages (start + end).
-    uintptr_t *pages = malloc(2 * g_trap_count * sizeof(uintptr_t));
-    if (!pages)
-    {
-        log_line("make_pages_shared: oom\n");
-        exit(EXIT_FAILURE);
-    }
-
-    size_t npages = 0;
-    for (size_t i = 0; i < g_trap_count; i++)
-    {
-        // uintptr_t start = (uintptr_t)g_traps[i].addr;
-        uintptr_t addr = (uintptr_t)g_traps[i].addr;
-
-        uintptr_t span = g_traps[i].is_loop ? span1 : span0;
-        // uintptr_t end = start + span - 1; // last byte actually belonging to this trap
-
-        uintptr_t start = addr - (g_traps[i].is_loop ? 7 : 0);
-        uintptr_t end = addr + span - 1;
-
-        uintptr_t base_start = start & pgmask;
-        uintptr_t base_end = end & pgmask;
-
-        // base_start is always needed; base_end only differs (and is only
-        // needed) if the trap's tail bytes crossed into the next page.
-        uintptr_t candidates[2] = {base_start, base_end};
-        int ncand = (base_start == base_end) ? 1 : 2;
-
-        for (int c = 0; c < ncand; c++)
-        {
-            uintptr_t base = candidates[c];
-            int dup = 0;
-            for (size_t j = 0; j < npages; j++)
-            {
-                if (pages[j] == base)
-                {
-                    dup = 1;
-                    break;
-                }
-            }
-            if (!dup)
-                pages[npages++] = base;
-        }
-    }
-
-    // log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
-    //          npages, g_trap_count);
-
-    for (size_t i = 0; i < npages; i++)
-        remap_page_shared(pages[i], pg);
-
-    free(pages);
-}
-
-static void collect_traps(void)
-{
-    size_t n = (size_t)(__stop___traps - __start___traps);
-    g_traps = malloc(n * sizeof(trap_entry));
-    if (!g_traps)
-    {
-        log_line("collect_traps: oom\n");
-        exit(EXIT_FAILURE);
-    }
-
-    size_t kept = 0;
-    for (size_t i = 0; i < n; i++)
-    {
-        void *addr = __start___traps[i];
-        unsigned char *b = (unsigned char *)addr;
-
-        int is_loop = (b[1] == 0x90 && b[2] == 0x90 &&
-                       b[3] == 0x90 && b[4] == 0x90);
-        uint32_t id = is_loop
-                        ? (b[5] | (b[6] << 8) | (b[7] << 16) | ((uint32_t)b[8] << 24))
-                        : (b[1] | (b[2] << 8) | (b[3] << 16) | ((uint32_t)b[4] << 24));
-
-        g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
-        // log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
-        //          i, g_traps[i].addr, g_traps[i].id, g_traps[i].is_loop);
-    }
-    g_trap_count = kept;
-    // log_line("collected %zu trap sites\n", g_trap_count);
-}
 
 int main(int argc, char **argv)
 {
@@ -472,11 +328,8 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    collect_traps();
-    make_pages_shared(); // <-- add this
-
     setup_shm();
     setup_signal();
-    run_forkserver(argv[0], argv[1]);
+    run_persisent(argv[0], argv[1]);
     return 0;
 }
