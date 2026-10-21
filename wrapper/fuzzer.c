@@ -7,6 +7,7 @@
 #include <stdarg.h> /* va_list, used by log_line() in startup.c */
 #include <stdio.h>
 #include <stdlib.h>
+#include <setjmp.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -14,7 +15,12 @@
 #include <sys/ucontext.h>
 #include <unistd.h>
 
+#define uthash_malloc(sz) __real_malloc(sz)
+#define uthash_free(ptr, sz) __real_free(ptr)
+
+#include "uthash.h"
 #include "data.h"
+#include "global.h"
 #include "config.h"
 #ifdef __APPLE__
 #include <mach-o/getsect.h>
@@ -22,6 +28,7 @@
 extern const struct mach_header_64 _mh_execute_header;
 #endif
 
+#define KEEP __attribute__((section("untracer_state")))
 
 #if defined(__linux__)
 #define UC_PC(uc) ((uc)->uc_mcontext.gregs[REG_RIP])
@@ -36,10 +43,27 @@ extern const struct mach_header_64 _mh_execute_header;
 /* ------------------------------------------------------------------ */
 /* Prototypes for externally-defined symbols                          */
 /* ------------------------------------------------------------------ */
+sigjmp_buf env;
 
 // extern void __reset_loop_counters(void);
 extern int target_main(int argc, char **argv);
 extern void __reset_loop_counters(void);
+
+static void sig_log(const char *msg, uintptr_t val);
+extern void __real__exit(int) __attribute__((noreturn));
+
+__attribute__((noreturn)) void __wrap_exit(int value) { siglongjmp(env, value ? value : 1); }
+__attribute__((noreturn)) void __wrap__exit(int value) { siglongjmp(env, value ? value : 1); }
+__attribute__((noreturn)) void __wrap__Exit(int value) { siglongjmp(env, value ? value : 1); }
+
+
+    typedef struct
+{
+    uintptr_t page;
+    UT_hash_handle hh;
+} writable_page;
+
+KEEP writable_page *writable_pages = NULL;
 
 typedef unsigned char u8;
 
@@ -55,6 +79,38 @@ static void init_log_path(void)
     if (p && *p && strlen(p) < sizeof(log_path))
     {
         strcpy(log_path, p);
+    }
+}
+
+void make_writeable(uintptr_t start, uintptr_t end)
+{
+    static size_t page_size = 0;
+    if (!page_size)
+        page_size = (size_t)sysconf(_SC_PAGESIZE);
+
+    uintptr_t first_page = start & ~(uintptr_t)(page_size - 1);
+
+    uintptr_t last_page = end & ~(uintptr_t)(page_size - 1); 
+
+    for (uintptr_t page = first_page; page <= last_page; page+=page_size) {
+        writable_page *found;
+        HASH_FIND(hh, writable_pages, &page, sizeof(uintptr_t), found);
+
+        if (found)
+            continue; /* already writable - skip the syscall */
+        if (mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+        {
+            sig_log("mprotect failed, page=", page);
+            __real__exit(EXIT_FAILURE);
+        }
+
+        /* __real_malloc via the uthash macros above: untracked, persistent. */
+        writable_page *entry = (writable_page *)__real_malloc(sizeof(*entry));
+        if (entry)
+        {
+            entry->page = page;
+            HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
+        }
     }
 }
 
@@ -133,7 +189,7 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         sig_log("addr underflow, base address assumption wrong: ", addr);
         abort();
     }
-
+    make_writeable(addr - 7, addr + 9);
     uintptr_t resume_addr = 0;
     unsigned char *trap = (unsigned char *)addr;
     int32_t value = 0, new_value = 0, index_block = 0;
@@ -189,6 +245,10 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
     UC_PC(uc) = resume_addr;
 }
 
+void crash_handler(int sig, siginfo_t *info, void *context)
+{
+    siglongjmp(env, sig);
+}
 
 void setup_signal(void)
 {
@@ -201,6 +261,14 @@ void setup_signal(void)
     sa.sa_sigaction = trap_handler;
     sa.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigaction(SIGTRAP, &sa, NULL);
+
+    // // Crash handler
+    // sa.sa_sigaction = crash_handler;
+    // sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    // sigaction(SIGILL, &sa, NULL);
+    // sigaction(SIGABRT, &sa, NULL);
+    // sigaction(SIGSEGV, &sa, NULL);
+    // sigaction(SIGBUS, &sa, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -218,7 +286,7 @@ static uint32_t *attach_shm(const char *env_name, size_t nwords)
         if (p == MAP_FAILED)
         {
             log_line("anon mmap failed for %s: %s\n", env_name, strerror(errno));
-            exit(EXIT_FAILURE);
+            __real__exit(EXIT_FAILURE);
         }
         return (uint32_t *)p;
     }
@@ -229,7 +297,7 @@ static uint32_t *attach_shm(const char *env_name, size_t nwords)
     if (errno != 0 || endptr == env || *endptr != '\0' || id < 0)
     {
         log_line("invalid %s value: %s\n", env_name, env);
-        exit(EXIT_FAILURE);
+        __real__exit(EXIT_FAILURE);
     }
 
     struct shmid_ds ds;
@@ -237,14 +305,14 @@ static uint32_t *attach_shm(const char *env_name, size_t nwords)
     {
         log_line("%s segment too small (%zu < %zu): fuzzer/harness built with different config.h?\n",
                  env_name, (size_t)ds.shm_segsz, nwords * sizeof(uint32_t));
-        exit(EXIT_FAILURE);
+        __real__exit(EXIT_FAILURE);
     }
 
     void *p = shmat((int)id, NULL, 0);
     if (p == (void *)-1)
     {
         log_line("shmat error for %s: %s\n", env_name, strerror(errno));
-        exit(EXIT_FAILURE);
+        __real__exit(EXIT_FAILURE);
     }
     return (uint32_t *)p;
 }
@@ -255,69 +323,271 @@ void setup_shm(void)
     trace_bits = attach_shm(SHM_ENV_VAR, MAP_SIZE_TRACE);
 }
 
-static void run_persisent(char *argv0, char *input)
+static void run_persistent(char *argv0, char *input)
 {
     uint32_t msg = 1;
     int standalone = !getenv(SHM_ENV_VAR) || write(FORKSRV_FD + 1, &msg, 4) != 4;
 
     char devnull[] = "/dev/null";
     char *args[] = {argv0, input, devnull, NULL};
-    int isActive = 0;
+
+    int child = -1; /* no persistent child yet */
+
+    if (standalone)
+    {
+        /* No forkserver protocol: just run the target once and exit,
+           same as your original standalone branch. */
+        child = fork();
+        if (child == 0)
+        {
+            __reset_loop_counters();
+            int rc = 0;
+            if (sigsetjmp(env, 1) == 0)
+                rc = target_main(3, args);
+            fflush(NULL);
+            __real__exit(rc);
+        }
+        int wait_status = 0;
+        while (waitpid(child, &wait_status, 0) < 0)
+        {
+            if (errno != EINTR)
+            {
+                log_line("waitpid: %s\n", strerror(errno));
+                __real__exit(1);
+            }
+        }
+        if (WIFSIGNALED(wait_status))
+            log_line("child killed by signal %d\n", WTERMSIG(wait_status));
+        log_line("new edges=%u new loop buckets=%u\n", trace_bits[0], trace_bits[3]);
+        __real__exit(WIFEXITED(wait_status) ? WEXITSTATUS(wait_status) : 128 + WTERMSIG(wait_status));
+    }
+
+    /* Forkserver loop: the PARENT talks to afl-fuzz. The child is the
+       persistent process that loops internally and stops itself. */
     for (;;)
     {
-        if (!standalone)
+        uint32_t cmd;
+        if (read(FORKSRV_FD, &cmd, 4) != 4)
+            __real__exit(0); /* afl went away */
+
+        uint32_t prev_timed_out = cmd; /* afl tells us if the last run timed out */
+
+        if (child == -1 || prev_timed_out)
         {
-            uint32_t cmd;
-            if (read(FORKSRV_FD, &cmd, 4) != 4)
-                _exit(0); /* afl went away */
+            /* No usable child: spawn a fresh persistent process. */
+            if (child != -1)
+            {
+                kill(child, SIGKILL);
+                waitpid(child, NULL, 0);
+            }
+            child = fork();
+            if (child == 0)
+            {
+                /* Persistent child: close afl's pipes, it doesn't need them. */
+                close(FORKSRV_FD);
+                close(FORKSRV_FD + 1);
+
+                for (;;)
+                {
+                    int sig = sigsetjmp(env, 1);
+                    if (sig == 0)
+                    {
+                        __reset_loop_counters();
+                        int rc = target_main(3, args);
+                        (void)rc;
+                    }
+                    fflush(NULL);
+                    /* Stop myself; parent resumes me with SIGCONT for the
+                    next test case, or kills+replaces me on timeout. */
+                    close_open_file_handles();
+                    free_open_heap();
+                    __untracer_restore_global();
+                    raise(SIGSTOP);
+                }
+            }
+        }
+        else
+        {
+            /* Reuse the existing stopped child. */
+            kill(child, SIGCONT);
         }
 
-        // pid_t child = fork();
-        if (isActive)
-        {
-            // close(FORKSRV_FD); /* don't hold afl's pipes open */
-            // close(FORKSRV_FD + 1);
-            __reset_loop_counters();
-            int rc = target_main(3, args);
-            fflush(NULL);
-            _exit(rc);
-        }
-        // else if (child < 0)
-        // {
-        //     log_line("could not fork child\n");
-        //     _exit(1);
-        // }
+        /* Tell afl-fuzz the PID to watch/kill on timeout. */
+        if (write(FORKSRV_FD + 1, &child, 4) != 4)
+            __real__exit(0);
 
-        /* NEW: tell AFL the child's PID so it can kill it on timeout */
-        if (!standalone)
-        {
-            if (write(FORKSRV_FD + 1, &child, 4) != 4)
-                _exit(0);
-        }
-
+        /* Wait for the child to stop (iteration done) or die (crash/killed). */
         int wait_status = 0;
-        // while (waitpid(child, &wait_status, 0) < 0)
-        // {
-        //     if (errno != EINTR)
-        //     {
-        //         log_line("waitpid: %s\n", strerror(errno));
-        //         _exit(1);
-        //     }
-        // }
-
-        if (standalone)
+        pid_t w;
+        while ((w = waitpid(child, &wait_status, WUNTRACED)) < 0)
         {
-            if (WIFSIGNALED(wait_status))
-                log_line("child killed by signal %d\n", WTERMSIG(wait_status));
-            log_line("new edges=%u new loop buckets=%u\n", trace_bits[0], trace_bits[3]);
-            exit(WIFEXITED(wait_status) ? WEXITSTATUS(wait_status) : 128 + WTERMSIG(wait_status));
+            if (errno != EINTR)
+            {
+                log_line("waitpid: %s\n", strerror(errno));
+                __real__exit(1);
+            }
         }
 
-        if (write(FORKSRV_FD + 1, &wait_status, 4) != 4)
-            _exit(0);
+        if (WIFSTOPPED(wait_status))
+        {
+            /* Normal end of one loop iteration. */
+            if (write(FORKSRV_FD + 1, &wait_status, 4) != 4)
+                __real__exit(0);
+        }
+        else
+        {
+            /* Child exited or was killed (crash, timeout, loop-count exit). */
+            if (write(FORKSRV_FD + 1, &wait_status, 4) != 4)
+                __real__exit(0);
+            child = -1; /* force a fresh fork next iteration */
+        }
     }
 }
 
+extern void *__start___traps[];
+extern void *__stop___traps[];
+
+typedef struct
+{
+    void *addr;
+    uint32_t id;
+    int is_loop;
+} trap_entry;
+
+static trap_entry *g_traps;
+static size_t g_trap_count;
+
+static void remap_page_shared(uintptr_t page_addr, long pg)
+{
+    int fd = memfd_create("text_shared", 0);
+    if (fd < 0)
+    {
+        log_line("memfd_create failed for %p\n", (void *)page_addr);
+        __real__exit(EXIT_FAILURE);
+    }
+
+    if (ftruncate(fd, pg) != 0)
+    {
+        log_line("ftruncate failed for %p\n", (void *)page_addr);
+        close(fd);
+        __real__exit(EXIT_FAILURE);
+    }
+
+    ssize_t written = write(fd, (void *)page_addr, pg);
+    if (written != pg)
+    {
+        log_line("short write copying page %p (%zd/%ld)\n", (void *)page_addr, written, pg);
+        close(fd);
+        __real__exit(EXIT_FAILURE);
+    }
+
+    void *r = mmap((void *)page_addr, pg, PROT_READ | PROT_WRITE | PROT_EXEC,
+                   MAP_SHARED | MAP_FIXED, fd, 0);
+    close(fd); // mapping holds its own reference; fd not needed after mmap
+
+    if (r == MAP_FAILED)
+    {
+        log_line("mmap MAP_FIXED failed for %p\n", (void *)page_addr);
+        __real__exit(EXIT_FAILURE);
+    }
+}
+
+static void make_pages_shared(void)
+{
+    long pg = sysconf(_SC_PAGESIZE);
+    uintptr_t pgmask = ~(uintptr_t)(pg - 1);
+
+    // Each trap's full on-disk span: 0xcc + 4 id bytes (category 0),
+    // or 0xcc + 4 marker bytes + 4 id bytes (category 1, loop headers).
+    // Any byte in that span may be overwritten for de-instrumentation,
+    // so every page touched by the span — not just the page containing
+    // the first byte — must be remapped shared.
+    const uintptr_t span0 = 5; // 1 (0xcc) + 4 (id)
+    const uintptr_t span1 = 9; // 1 (0xcc) + 4 (marker) + 4 (id)
+
+    // Worst case: every trap touches 2 distinct pages (start + end).
+    uintptr_t *pages = malloc(2 * g_trap_count * sizeof(uintptr_t));
+    if (!pages)
+    {
+        log_line("make_pages_shared: oom\n");
+        __real__exit(EXIT_FAILURE);
+    }
+
+    size_t npages = 0;
+    for (size_t i = 0; i < g_trap_count; i++)
+    {
+        // uintptr_t start = (uintptr_t)g_traps[i].addr;
+        uintptr_t addr = (uintptr_t)g_traps[i].addr;
+
+        uintptr_t span = g_traps[i].is_loop ? span1 : span0;
+        // uintptr_t end = start + span - 1; // last byte actually belonging to this trap
+
+        uintptr_t start = addr - (g_traps[i].is_loop ? 7 : 0);
+        uintptr_t end = addr + span - 1;
+
+        uintptr_t base_start = start & pgmask;
+        uintptr_t base_end = end & pgmask;
+
+        // base_start is always needed; base_end only differs (and is only
+        // needed) if the trap's tail bytes crossed into the next page.
+        uintptr_t candidates[2] = {base_start, base_end};
+        int ncand = (base_start == base_end) ? 1 : 2;
+
+        for (int c = 0; c < ncand; c++)
+        {
+            uintptr_t base = candidates[c];
+            int dup = 0;
+            for (size_t j = 0; j < npages; j++)
+            {
+                if (pages[j] == base)
+                {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (!dup)
+                pages[npages++] = base;
+        }
+    }
+
+    // log_line("remapping %zu distinct pages (from %zu traps) as MAP_SHARED\n",
+    //          npages, g_trap_count);
+
+    for (size_t i = 0; i < npages; i++)
+        remap_page_shared(pages[i], pg);
+
+    free(pages);
+}
+
+static void collect_traps(void)
+{
+    size_t n = (size_t)(__stop___traps - __start___traps);
+    g_traps = malloc(n * sizeof(trap_entry));
+    if (!g_traps)
+    {
+        log_line("collect_traps: oom\n");
+        __real__exit(EXIT_FAILURE);
+    }
+
+    size_t kept = 0;
+    for (size_t i = 0; i < n; i++)
+    {
+        void *addr = __start___traps[i];
+        unsigned char *b = (unsigned char *)addr;
+
+        int is_loop = (b[1] == 0x90 && b[2] == 0x90 &&
+                       b[3] == 0x90 && b[4] == 0x90);
+        uint32_t id = is_loop
+                          ? (b[5] | (b[6] << 8) | (b[7] << 16) | ((uint32_t)b[8] << 24))
+                          : (b[1] | (b[2] << 8) | (b[3] << 16) | ((uint32_t)b[4] << 24));
+
+        g_traps[kept++] = (trap_entry){.addr = addr, .id = id, .is_loop = is_loop};
+        // log_line("trap[%zu]: addr=%p id=%u loop=%d\n",
+        //          i, g_traps[i].addr, g_traps[i].id, g_traps[i].is_loop);
+    }
+    g_trap_count = kept;
+    // log_line("collected %zu trap sites\n", g_trap_count);
+}
 
 int main(int argc, char **argv)
 {
@@ -325,11 +595,13 @@ int main(int argc, char **argv)
     if (argc < 2)
     {
         log_line("usage: harness <input_file>\n");
-        exit(EXIT_FAILURE);
+        __real__exit(EXIT_FAILURE);
     }
+    collect_traps();
+    make_pages_shared(); // <-- add this
 
     setup_shm();
     setup_signal();
-    run_persisent(argv[0], argv[1]);
+    run_persistent(argv[0], argv[1]);
     return 0;
 }

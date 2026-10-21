@@ -1,4 +1,5 @@
 #include "common.h"
+#include "GlobalPass.h"
 #include "RenameMain.h"
 using namespace llvm;
 
@@ -8,7 +9,8 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
         LLVM_PLUGIN_API_VERSION,
         "UntracerPass",
         LLVM_VERSION_STRING,
-        [](PassBuilder &PB) {
+        [](PassBuilder &PB)
+        {
             // Register by name so opt can find it
             PB.registerPipelineParsingCallback(
                 [](StringRef Name, ModulePassManager &MPM,
@@ -17,13 +19,10 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
                     if (Name == "rename")
                     {
                         MPM.addPass(RenameMainPass());
-                        // MPM.addPass(HeapResetPass());
-                        // MPM.addPass(ExitHookPass());
-                        // MPM.addPass(FileHookPass());
+                        MPM.addPass(CloneGlobalsPass());
                         return true;
                     }
                     return false;
                 });
-        }
-    };
+        }};
 }

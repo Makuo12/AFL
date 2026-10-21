@@ -106,6 +106,31 @@ $BIN_PATH/clang++ $wrap/src/DeIntrumentation.cc $wrap/src/DeEdgeHandler.cc \
 
 $wrap/output/edge "$wrap/output/out.ll" "$wrap/output/main.transformed.ll"
 
+# Fail early if the pass did not tag any globals.
+grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
+    || { echo "ERROR: pass did not tag any globals"; exit 1; }
+
+# Runtime sources are compiled as C (-x c) so the --wrap symbols and the
+# __real_* declarations keep plain C names.
+# Runtime sources are compiled as C (-x c) so the --wrap symbols and the
+# __real_* declarations keep plain C names.
+RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/heap_track_oa.c -x none"
+
+# File-handle wrappers (filer.c)
+FILE_WRAP_FLAGS="-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
+                 -Wl,--wrap=tmpfile -Wl,--wrap=popen -Wl,--wrap=fclose -Wl,--wrap=pclose"
+
+EXIT_WRAP_FLAGS="-Wl,--wrap=exit -Wl,--wrap=_exit -Wl,--wrap=_Exit"
+
+# Heap wrappers (mem_track.c)
+MEM_WRAP_FLAGS="-Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc -Wl,--wrap=free \
+                -Wl,--wrap=reallocarray -Wl,--wrap=memalign -Wl,--wrap=aligned_alloc \
+                -Wl,--wrap=posix_memalign -Wl,--wrap=valloc -Wl,--wrap=pvalloc \
+                -Wl,--wrap=strdup -Wl,--wrap=strndup \
+                -Wl,--wrap=getline -Wl,--wrap=getdelim"
+
+WRAP_FLAGS="$FILE_WRAP_FLAGS $MEM_WRAP_FLAGS $FILE_WRAP_FLAGS"
+
 echo "Building final binary"
 if [[ "$(uname -s)" == "Darwin" ]]; then
     INCLUDE="-isysroot $(xcrun --show-sdk-path)"
@@ -119,11 +144,13 @@ elif [[ "$(uname -s)" == "Linux" ]]; then
             $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie -fuse-ld=bfd \
             -Wl,--image-base=$BASE_ADDRESS -Wl,-z,noseparate-code \
+            $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     else
         $BIN_PATH/clang++ $PERF_FLAGS -I $wrap/include \
             $wrap/output/main.transformed.ll $RUNTIME $wrap/output/fuzzer.bc \
             -no-pie \
+            $WRAP_FLAGS \
             -o $wrap/output/main.oracle
     fi
     cp  $wrap/output/main.oracle $wrap/output/main.trace           # This is just a dummy file to satisfy the fuzzer's expectations. The actual tracing is done by the instrumentation pass.
