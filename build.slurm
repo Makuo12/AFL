@@ -114,7 +114,7 @@ grep -q 'section "__cls_glob"' $wrap/output/main.transformed.ll \
 # __real_* declarations keep plain C names.
 # Runtime sources are compiled as C (-x c) so the --wrap symbols and the
 # __real_* declarations keep plain C names.
-RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/heap_track_oa.c -x none"
+RUNTIME="-x c $wrap/wrapper/global.c $wrap/wrapper/filer.c $wrap/wrapper/mem_track.c -x none"
 
 # File-handle wrappers (filer.c)
 FILE_WRAP_FLAGS="-Wl,--wrap=fopen -Wl,--wrap=fopen64 -Wl,--wrap=freopen -Wl,--wrap=fdopen \
