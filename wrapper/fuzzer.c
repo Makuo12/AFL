@@ -602,6 +602,7 @@ int main(int argc, char **argv)
 
     setup_shm();
     setup_signal();
+    __untracer_setup_global();
     run_persistent(argv[0], argv[1]);
     return 0;
 }
