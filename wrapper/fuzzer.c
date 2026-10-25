@@ -57,13 +57,13 @@ __attribute__((noreturn)) void __wrap__exit(int value) { siglongjmp(env, value ?
 __attribute__((noreturn)) void __wrap__Exit(int value) { siglongjmp(env, value ? value : 1); }
 
 
-    typedef struct
-{
-    uintptr_t page;
-    UT_hash_handle hh;
-} writable_page;
+//     typedef struct
+// {
+//     uintptr_t page;
+//     UT_hash_handle hh;
+// } writable_page;
 
-KEEP writable_page *writable_pages = NULL;
+// KEEP writable_page *writable_pages = NULL;
 
 typedef unsigned char u8;
 
@@ -82,37 +82,37 @@ static void init_log_path(void)
     }
 }
 
-void make_writeable(uintptr_t start, uintptr_t end)
-{
-    static size_t page_size = 0;
-    if (!page_size)
-        page_size = (size_t)sysconf(_SC_PAGESIZE);
+// void make_writeable(uintptr_t start, uintptr_t end)
+// {
+//     static size_t page_size = 0;
+//     if (!page_size)
+//         page_size = (size_t)sysconf(_SC_PAGESIZE);
 
-    uintptr_t first_page = start & ~(uintptr_t)(page_size - 1);
+//     uintptr_t first_page = start & ~(uintptr_t)(page_size - 1);
 
-    uintptr_t last_page = end & ~(uintptr_t)(page_size - 1); 
+//     uintptr_t last_page = end & ~(uintptr_t)(page_size - 1); 
 
-    for (uintptr_t page = first_page; page <= last_page; page+=page_size) {
-        writable_page *found;
-        HASH_FIND(hh, writable_pages, &page, sizeof(uintptr_t), found);
+//     for (uintptr_t page = first_page; page <= last_page; page+=page_size) {
+//         writable_page *found;
+//         HASH_FIND(hh, writable_pages, &page, sizeof(uintptr_t), found);
 
-        if (found)
-            continue; /* already writable - skip the syscall */
-        if (mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
-        {
-            sig_log("mprotect failed, page=", page);
-            __real__exit(EXIT_FAILURE);
-        }
+//         if (found)
+//             continue; /* already writable - skip the syscall */
+//         if (mprotect((void *)page, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+//         {
+//             sig_log("mprotect failed, page=", page);
+//             __real__exit(EXIT_FAILURE);
+//         }
 
-        /* __real_malloc via the uthash macros above: untracked, persistent. */
-        writable_page *entry = (writable_page *)__real_malloc(sizeof(*entry));
-        if (entry)
-        {
-            entry->page = page;
-            HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
-        }
-    }
-}
+//         /* __real_malloc via the uthash macros above: untracked, persistent. */
+//         writable_page *entry = (writable_page *)__real_malloc(sizeof(*entry));
+//         if (entry)
+//         {
+//             entry->page = page;
+//             HASH_ADD(hh, writable_pages, page, sizeof(uintptr_t), entry);
+//         }
+//     }
+// }
 
 /* ------------------------------------------------------------------ */
 /* Logging                                                            */
@@ -189,7 +189,6 @@ void trap_handler(int sig, siginfo_t *info, void *ctx)
         sig_log("addr underflow, base address assumption wrong: ", addr);
         abort();
     }
-    make_writeable(addr - 7, addr + 9);
     uintptr_t resume_addr = 0;
     unsigned char *trap = (unsigned char *)addr;
     int32_t value = 0, new_value = 0, index_block = 0;
@@ -392,6 +391,7 @@ static void run_persistent(char *argv0, char *input)
                     int sig = sigsetjmp(env, 1);
                     if (sig == 0)
                     {
+                        optind = 0; /* glibc: also reinitializes getopt's internal state */
                         __reset_loop_counters();
                         int rc = target_main(3, args);
                         (void)rc;
@@ -401,7 +401,10 @@ static void run_persistent(char *argv0, char *input)
                     next test case, or kills+replaces me on timeout. */
                     close_open_file_handles();
                     free_open_heap();
-                    __untracer_restore_global();
+                    if (__untracer_restore_global()) {
+                        log_line("__untracer_restore_global failed to clean\n");
+                        __real__exit(EXIT_FAILURE);
+                    }
                     raise(SIGSTOP);
                 }
             }
@@ -602,7 +605,15 @@ int main(int argc, char **argv)
 
     setup_shm();
     setup_signal();
-    __untracer_setup_global();
+
+    if (__untracer_setup_global()) {
+        log_line("failed to setup globals \n");
+        __real__exit(EXIT_FAILURE);
+    }
+
+    __untracer_snapshot_fds(); // missing
+    __untracer_heap_start();   // missing
+
     run_persistent(argv[0], argv[1]);
     return 0;
 }

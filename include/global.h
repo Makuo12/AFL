@@ -13,7 +13,7 @@ extern "C"
 #endif
 
     /* global.c: snapshot/restore of the target's globals */
-    void __untracer_setup_global(void);
+    int __untracer_setup_global(void);
     int __untracer_restore_global(void);
 
     /* filer.c: FILE* tracking and raw-fd baseline */

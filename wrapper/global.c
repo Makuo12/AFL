@@ -34,10 +34,10 @@ extern "C"
 
     /* Call once, after static initialization (e.g. at the start of main),
      * and before __untracer_heap_start(). */
-    void __untracer_setup_global(void)
+    int __untracer_setup_global(void)
     {
         if (ready) /* a second call would leak the first snapshot */
-            return;
+            return 0;
 
         char *start = __start___cls_glob;
         char *stop = __stop___cls_glob;
@@ -45,7 +45,7 @@ extern "C"
         if (!start || start == stop)
         {
             fprintf(stderr, "Error: section __cls_glob is missing or empty\n");
-            return;
+            return 1;
         }
 
         size_t size = (size_t)(stop - start);
@@ -56,13 +56,14 @@ extern "C"
         if (!buf)
         {
             perror("global snapshot malloc");
-            return;
+            return 1;
         }
 
         memcpy(buf, start, size);
         snapshot = buf;
         snapshot_size = size;
         ready = 1;
+        return 0;
     }
 
     /* Returns 0 on success, -1 if setup did not succeed. The caller should
