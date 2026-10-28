@@ -24,7 +24,7 @@ module load GCCcore/14.3.0
 PROGRAM="forkserver_afl"
 ORACLE="main.oracle"
 TRACE="main.trace"
-NUM_RUNS=10
+NUM_RUNS=5
 
 wrap="$HOME/forkserver/AFL"
 runner="$wrap/forkserver_runner"
