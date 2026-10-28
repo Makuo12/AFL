@@ -22,7 +22,7 @@ module load GCCcore/14.3.0
 
 PROGRAM="de_forkserver_afl"
 TRACE="main.trace"
-NUM_RUNS=10
+NUM_RUNS=5
 
 wrap="$HOME/de_forkserver/AFL"
 runner="$wrap/de_forkserver_runner"
