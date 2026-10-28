@@ -7,6 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH --exclusive
 #SBATCH --mem=0
+#SBATCH --exclude=tc-hm[001-008]
 #SBATCH --output=./logs/forkserver-%j.log
 #SBATCH --error=./logs/forkserver-%j.log
 # Add --exclude=<the 8 large-memory node names> here or on the sbatch command line.
