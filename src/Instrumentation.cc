@@ -216,7 +216,7 @@ void processBlocks(Module &M, SmallPtrSet<BasicBlock *, 16> &seen, string &cover
         }
         assert(slot == N && "loop count and loop instrumentation disagree");
     }
-
+    errs() << "Total trap ids assigned: " << wholeCount << "\n";
 }
 
 void setupEnv(string &coverageType) {
